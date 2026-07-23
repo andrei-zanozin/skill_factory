@@ -1,5 +1,3 @@
-import { tool } from "@opencode-ai/plugin"
-
 const SEVERITIES = ["Critical", "Major", "Minor"] as const
 type Severity = (typeof SEVERITIES)[number]
 
@@ -177,54 +175,107 @@ export function renderReviewReport(review: ReviewResult): string {
   return `${lines.join("\n")}\n`
 }
 
-const nonEmptyText = tool.schema.string().min(1)
-const layer = tool.schema.enum([
-  "solution-and-architecture",
-  "unit-correctness",
-  "code-polish",
-])
+const nonEmptyTextSchema = {
+  type: "string",
+  minLength: 1,
+} as const
+const layerSchema = {
+  type: "string",
+  enum: ["solution-and-architecture", "unit-correctness", "code-polish"],
+} as const
 
-export default tool({
+// Keep the copied tool self-contained: OpenCode also accepts JSON Schema entries
+// directly and does not need the @opencode-ai/plugin helper at runtime.
+export default {
   description:
     "Validate and deterministically render a verified, deduplicated deep-review result as stable severity-prioritized Markdown.",
   args: {
-    review: tool.schema
-      .object({
-        schemaVersion: tool.schema.literal("1"),
-        summary: tool.schema
-          .object({
-            reviewTarget: nonEmptyText,
-            description: nonEmptyText,
-            baseRevision: nonEmptyText,
-            headRevision: nonEmptyText,
-            limitations: tool.schema.array(nonEmptyText),
-          })
-          .strict(),
-        findings: tool.schema.array(
-          tool.schema
-            .object({
-              severity: tool.schema.enum(SEVERITIES),
-              title: nonEmptyText,
-              location: tool.schema
-                .object({
-                  file: nonEmptyText,
-                  lines: tool.schema.string(),
-                  symbol: tool.schema.string(),
-                })
-                .strict(),
-              problem: nonEmptyText,
-              impact: nonEmptyText,
-              suggestedFix: nonEmptyText,
-              evidence: tool.schema.array(nonEmptyText).min(1),
-              sourceLayers: tool.schema.array(layer).min(1),
-            })
-            .strict(),
-        ),
-      })
-      .strict()
-      .describe("Verified and deduplicated review result"),
+    review: {
+      type: "object",
+      description: "Verified and deduplicated review result",
+      additionalProperties: false,
+      required: ["schemaVersion", "summary", "findings"],
+      properties: {
+        schemaVersion: {
+          type: "string",
+          const: "1",
+        },
+        summary: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "reviewTarget",
+            "description",
+            "baseRevision",
+            "headRevision",
+            "limitations",
+          ],
+          properties: {
+            reviewTarget: nonEmptyTextSchema,
+            description: nonEmptyTextSchema,
+            baseRevision: nonEmptyTextSchema,
+            headRevision: nonEmptyTextSchema,
+            limitations: {
+              type: "array",
+              items: nonEmptyTextSchema,
+            },
+          },
+        },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "severity",
+              "title",
+              "location",
+              "problem",
+              "impact",
+              "suggestedFix",
+              "evidence",
+              "sourceLayers",
+            ],
+            properties: {
+              severity: {
+                type: "string",
+                enum: SEVERITIES,
+              },
+              title: nonEmptyTextSchema,
+              location: {
+                type: "object",
+                additionalProperties: false,
+                required: ["file", "lines", "symbol"],
+                properties: {
+                  file: nonEmptyTextSchema,
+                  lines: {
+                    type: "string",
+                  },
+                  symbol: {
+                    type: "string",
+                  },
+                },
+              },
+              problem: nonEmptyTextSchema,
+              impact: nonEmptyTextSchema,
+              suggestedFix: nonEmptyTextSchema,
+              evidence: {
+                type: "array",
+                minItems: 1,
+                items: nonEmptyTextSchema,
+              },
+              sourceLayers: {
+                type: "array",
+                minItems: 1,
+                items: layerSchema,
+              },
+            },
+          },
+        },
+      },
+    },
   },
-  async execute({ review }) {
-    return renderReviewReport(review as ReviewResult)
+  async execute({ review }: { review: ReviewResult }) {
+    return renderReviewReport(review)
   },
-})
+}

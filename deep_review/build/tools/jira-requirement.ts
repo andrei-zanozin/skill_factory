@@ -1,7 +1,5 @@
 import { readFileSync } from "node:fs"
 
-import { tool } from "@opencode-ai/plugin"
-
 const ISSUE_KEY = /^[A-Z][A-Z0-9_]*-\d+$/
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_RETRIES = 3
@@ -613,16 +611,20 @@ export async function retrieveJiraRequirement(issue: string): Promise<string> {
   }
 }
 
-export default tool({
+// Keep the copied tool self-contained: OpenCode also accepts JSON Schema entries
+// directly and does not need the @opencode-ai/plugin helper at runtime.
+export default {
   description:
     "Read one Jira Data Center issue and every visible comment as normalized, explicitly untrusted requirement data with provenance and completeness metadata.",
   args: {
-    issue: tool.schema
-      .string()
-      .min(1)
-      .describe("Jira issue key or browse URL permitted by the configured Jira server"),
+    issue: {
+      type: "string",
+      minLength: 1,
+      description:
+        "Jira issue key or browse URL permitted by the configured Jira server",
+    },
   },
-  async execute({ issue }) {
+  async execute({ issue }: { issue: string }) {
     return retrieveJiraRequirement(issue)
   },
-})
+}
