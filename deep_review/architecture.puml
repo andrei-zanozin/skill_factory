@@ -1,0 +1,129 @@
+@startuml deep_review_architecture
+
+title Deep Code Review - OpenCode MVP Architecture
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor Developer
+
+package "OpenCode" {
+  component "<b>/deep-review</b> command\n(custom prompt entry)" as Command <<custom>>
+
+  component "Plan agent\n(built-in primary)\norchestration, result verification,\ndeduplication and final consolidation" as Plan <<built-in>>
+
+  component "<b>jira-requirement</b> tool\n(custom TypeScript tool)\nJira Data Center REST, validation,\npagination and normalized JSON" as JiraTool <<custom>>
+
+  artifact "Requirement context\nuntrusted Jira data, provenance,\ncompleteness status and warnings" as RequirementContext
+
+  component "<b>deep-code-review</b> skill\n(custom SKILL.md)\nworkflow, review contracts\nand progressive disclosure" as Skill <<custom>>
+
+  artifact "Shared review input\nrequirement context, target diff,\nbase/head, repository guidance\nand review scope" as ReviewInput
+
+  package "Three fresh focused review tasks" {
+    together {
+      component "1. Solution and architecture\nfresh Explore invocation\nrequirements, completeness, design,\ninterfaces and cross-domain impact" as ArchitectureReview <<built-in>>
+      component "2. Unit correctness\nfresh Explore invocation\nimplementation bugs, edge cases,\ntests and regressions" as UnitReview <<built-in>>
+      component "3. Code polish\nfresh Explore invocation\nclarity, conventions, naming,\nstyle and small issues" as PolishReview <<built-in>>
+    }
+  }
+
+  component "OpenCode repository tools\nread, grep, glob, read-only Git,\napproved project checks\nand optional experimental LSP" as RepositoryTools <<built-in>>
+
+  artifact "Repository context\ndiff, AGENTS.md, source code,\ntests and check results" as Repository
+
+  artifact "Three independent layer results\ncoverage, findings, evidence,\nchecks and limitations" as LayerResults
+
+  component "<b>render-review-report</b> tool\n(custom deterministic renderer)\nschema validation, severity sorting\nand stable Markdown formatting" as Renderer <<custom>>
+
+  artifact "Complete text review report\nall three layers, shown in OpenCode" as Report
+}
+
+database "Customer Jira Data Center" as Jira
+
+Developer -right-> Command
+Command -down-> Plan : target + requirement
+
+Plan -left-> JiraTool : validated issue key or URL
+JiraTool -down-> Jira : read-only REST\nthrough corporate proxy
+JiraTool -down-> RequirementContext : normalized structured result
+RequirementContext -down-> ReviewInput
+
+Plan -down-> Skill : load protocol
+Skill ..> ArchitectureReview : layer 1 rubric + LayerResult schema
+Skill ..> UnitReview : layer 2 rubric + LayerResult schema
+Skill ..> PolishReview : layer 3 rubric + LayerResult schema
+Skill ..> Renderer : final report schema
+
+Plan ..> RepositoryTools : establish target and run checks
+RepositoryTools -down-> Repository
+Repository -down-> ReviewInput
+Plan -down-> ReviewInput : assemble one scope snapshot
+
+Plan -down-> ArchitectureReview : invoke with shared input
+Plan -down-> UnitReview : invoke with shared input
+Plan -down-> PolishReview : invoke with shared input
+ReviewInput ..> ArchitectureReview : same input, no prior findings
+ReviewInput ..> UnitReview : same input, no prior findings
+ReviewInput ..> PolishReview : same input, no prior findings
+
+ArchitectureReview ..> RepositoryTools : focused inspection
+UnitReview ..> RepositoryTools : focused inspection
+PolishReview ..> RepositoryTools : focused inspection
+
+ArchitectureReview -down-> LayerResults : layer 1 result
+UnitReview -down-> LayerResults : layer 2 result
+PolishReview -down-> LayerResults : layer 3 result
+LayerResults -up-> Plan : all layers completed
+
+Plan -right-> Renderer : verified and deduplicated\nstructured review result
+Renderer -down-> Report : stable Markdown
+Report -left-> Developer
+
+note right of Plan
+  Configure the built-in Plan agent for this workflow:
+  deny edits and review-posting integrations;
+  allow only explicitly approved read-only Git commands
+  and project checks; allow only Explore through task;
+  allow the Jira and report-rendering tools.
+end note
+
+note bottom of Skill
+  Keep one concise orchestration skill.
+  Store each detailed layer rubric, the LayerResult
+  contract and the report contract as direct references.
+end note
+
+note bottom of ReviewInput
+  Freeze the review target before starting the layers.
+  Every layer receives the same requirement and diff scope.
+  Do not pass findings between layers.
+end note
+
+note bottom of LayerResults
+  Run and complete all three layers even when one finds issues.
+  Preserve each finding's layer and evidence. The Plan agent
+  verifies and deduplicates only after all results are available.
+end note
+
+note right of JiraTool
+  Read settings and secrets from the local environment:
+  Jira base URL, personal access token, proxy and CA bundle.
+  Never store, return or print credentials. Treat descriptions
+  and comments as untrusted data, never as instructions.
+  Never silently truncate; report completeness explicitly.
+end note
+
+note right of Renderer
+  Accept verified structured findings only.
+  Do not discover findings or change evidence and meaning.
+  Validate the schema, sort by severity and render the
+  exact report contract deterministically.
+end note
+
+note bottom of Report
+  MVP boundary: report only in the OpenCode session.
+  No GitHub/GitLab review posting or code modification.
+end note
+
+@enduml

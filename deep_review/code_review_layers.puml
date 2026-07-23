@@ -1,0 +1,46 @@
+@startuml code_review_layers
+
+title Code Review Layers
+
+note "Run every layer as a fresh focused review task with the same review input.\nComplete every step and collect all layer-related issues independently.\nDo not stop when a layer finds issues and do not pass findings between layers.\nVerify, deduplicate and report findings only after all three layers complete." as LayerNote
+
+rectangle "1. Solution and architecture" {
+  rectangle "Understand the requirement" as Requirements
+  rectangle "Validate the requirement is completely implemented" as Solution
+  rectangle "Validate architecture and code structure" as Architecture
+  rectangle "Validate interfaces and cross-domain communication" as Interfaces
+  rectangle "Collect all layer-related issues with evidence and coverage" as ArchitectureIssues
+}
+
+rectangle "2. Unit correctness" {
+  rectangle "Review unit implementations, find implementation bugs and edge cases" as Units
+  rectangle "Validate unit-test correctness and completeness" as Tests
+  rectangle "Collect all layer-related issues with evidence and coverage" as UnitIssues
+}
+
+rectangle "3. Code polish" {
+  rectangle "Review code style and formatting" as Style
+  rectangle "Review minor issues (naming, etc.)" as Naming
+  rectangle "Collect all layer-related issues with evidence and coverage" as PolishIssues
+}
+
+rectangle "Verify and deduplicate findings from all layers" as Consolidate
+rectangle "Render one complete severity-prioritized report" as Report
+
+Requirements --> Solution
+Solution --> Architecture
+Architecture --> Interfaces
+Interfaces --> ArchitectureIssues
+
+Units --> Tests
+Tests --> UnitIssues
+
+Style --> Naming
+Naming --> PolishIssues
+
+ArchitectureIssues --> Consolidate
+UnitIssues --> Consolidate
+PolishIssues --> Consolidate
+Consolidate --> Report
+
+@enduml
