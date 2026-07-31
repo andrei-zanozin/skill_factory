@@ -33,7 +33,7 @@ Limitations:
 
 ## Critical
 
-### <Concise Critical finding title>
+### 1. <Concise Critical finding title>
 
 - Location: `<file>:<lines>` (`<symbol>`)
 - Problem and impact: <problem> <impact>
@@ -42,7 +42,7 @@ Limitations:
 
 ## Major
 
-### <Concise Major finding title>
+### 2. <Concise Major finding title>
 
 - Location: `<file>:<lines>` (`<symbol>`)
 - Problem and impact: <problem> <impact>
@@ -51,7 +51,7 @@ Limitations:
 
 ## Minor
 
-### <Concise Minor finding title>
+### 3. <Concise Minor finding title>
 
 - Location: `<file>:<lines>` (`<symbol>`)
 - Problem and impact: <problem> <impact>
@@ -66,6 +66,7 @@ Apply these rules literally:
 - Repeat each limitation as one `- ` list item without combining distinct limitations.
 - Use only the severity headings needed for the final findings.
 - Repeat the finding block for every finding in the required order.
+- Number findings consecutively in their final rendered order across all severity groups, starting at `1`. Never restart numbering for a new severity group and never expose layer candidate IDs.
 - Keep the labels `Location:`, `Problem and impact:`, `Suggested fix:`, and `Evidence:` exactly as written and in that order.
 - Render the location as `` `<file>` `` when lines are unavailable; otherwise render `` `<file>:<lines>` ``.
 - Append `` (`<symbol>`) `` only when a symbol is available.

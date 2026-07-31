@@ -12,6 +12,7 @@ Consolidate the layer results into one verified, deduplicated set of final findi
 - Preserve multiple `sourceLayers` when independent layers found the same defect.
 - State material requirement, target, coverage, or check limitations in the final report summary.
 - Do not use a finding to represent uncertainty alone.
+- After severity assignment and final sorting, number all findings consecutively across severity groups, starting at `1`. These final report numbers are the only identifiers accepted by `/send-comments`.
 
 ## Severity rules
 

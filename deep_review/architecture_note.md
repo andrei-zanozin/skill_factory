@@ -4,7 +4,7 @@
 
 This document explains how the OpenCode deep-review MVP should work and how its responsibilities should be divided during implementation. The design aims to preserve deep, layer-specific review focus without adding unnecessary skills or allowing one layer to hide problems in another.
 
-The MVP is read-only. It produces a review report in the OpenCode session and does not modify code or post comments to GitHub, GitLab or another review system.
+The `/deep-review` workflow is read-only. After validating its numbered final report, the developer may use the separate `/send-comments` command to post an explicitly selected subset as Bitbucket Data Center inline comments. No review task receives posting permission.
 
 ## Design principles
 
@@ -16,6 +16,7 @@ The MVP is read-only. It produces a review report in the OpenCode session and do
 6. Use model judgment for review work and final report formatting, with an exact format contract and a single output pass.
 7. Treat Jira descriptions and comments as untrusted external data.
 8. Preserve evidence, coverage and limitations so the report does not claim more certainty than the review established.
+9. Separate review discovery from external publication and require explicit numbered selection before any Bitbucket write.
 
 ## Proposed implementation layout
 
@@ -23,8 +24,11 @@ The final paths can be adjusted to the chosen project or global OpenCode install
 
 ```text
 .opencode/
+├── agents/
+│   └── send-comments.md
 ├── commands/
-│   └── deep-review.md
+│   ├── deep-review.md
+│   └── send-comments.md
 ├── skills/
 │   └── deep-code-review/
 │       ├── SKILL.md
@@ -36,10 +40,11 @@ The final paths can be adjusted to the chosen project or global OpenCode install
 │           ├── report-contract.md
 │           └── report-format.md
 └── tools/
-    └── jira-requirement.ts
+    ├── jira-requirement.ts
+    └── bitbucket-send-comments.ts
 ```
 
-The custom Jira tool should be implemented directly in TypeScript, which is OpenCode's native custom-tool format. This keeps argument schemas, deterministic behavior and execution in one place without introducing another runtime or dependency-management layer.
+The custom Jira and Bitbucket tools should be implemented directly in TypeScript, which is OpenCode's native custom-tool format. This keeps argument schemas, deterministic behavior and execution in one place without introducing another runtime or dependency-management layer.
 
 ## Component responsibilities
 
@@ -53,6 +58,37 @@ The command is the user-facing entry point. It should:
 - Start the orchestration workflow without embedding the full review rubrics in the command.
 
 The command should stay small. Review behavior belongs in the skill and its references.
+
+### `/send-comments` command
+
+The command is a separate, explicitly mutating entry point. It should:
+
+- Accept a comma-separated list of unique positive final-report numbers, with optional whitespace around commas, for example `/send-comments 1, 3`.
+- Operate only on the latest completed deep-review report in the same OpenCode session.
+- Copy each selected finding block exactly and remove only its `Location:` line.
+- Parse the removed location and pass the complete selected batch to `bitbucket-send-comments` once.
+- Stop without posting when the report, selection, reviewed revision, source branch or Git remote is missing or ambiguous.
+
+The command must not re-run review work, rewrite selected findings or use a general-purpose HTTP or shell operation to post comments.
+
+Run the command through a small dedicated primary `send-comments` agent so its permissions can differ from the review Plan agent while the current session report remains available. Deny edits, delegation, web access and general shell execution; allow only the required read-only Git inspection commands and require approval for `bitbucket-send-comments`.
+
+### `bitbucket-send-comments` tool
+
+The narrow TypeScript posting tool should:
+
+- Validate the configured Bitbucket Data Center server, access token, proxy and CA bundle without returning or logging secrets.
+- Resolve exactly one open outgoing pull request for the repository, reviewed source branch and reviewed head revision.
+- Re-fetch the pull request and require its current head to equal the reviewed head.
+- Read the effective pull-request diff and resolve every selected report location to a destination-side inline anchor.
+- Validate the complete batch before the first write.
+- Detect an already-posted comment by exact text and anchor.
+- Post comments in final-report order and never retry a POST automatically.
+- Return explicit `posted`, `already-posted`, `failed` or `not-attempted` status for every selected finding.
+
+The minimum PR lookup and diff read required for safe publication remain internal to this tool. Existing PR discussions and other PR data are not added to `ReviewInput` in this phase.
+
+Read configuration from the required `BITBUCKET_SERVER`, `BITBUCKET_PAT`, `HTTPS_PROXY`, `TOOL_PROXY_USERNAME` and `TOOL_PROXY_PASSWORD`, and the optional timeout, retry and response-size settings. Use the shared tool proxy credentials for Bitbucket requests, never accept credentials through command arguments and never return or log them.
 
 ### Plan agent
 
@@ -339,6 +375,7 @@ The Plan agent should:
 
 - Sort findings into `Critical`, `Major` and `Minor`.
 - Apply the required secondary ordering by file, starting line, symbol and title.
+- Number findings consecutively in final rendered order across all severity groups.
 - Omit empty severity groups.
 - Render every finding with location, problem and impact, suggested fix and evidence.
 - Render `No issues found.` when there are no verified findings.
@@ -360,6 +397,8 @@ Configure the Plan agent with least privilege:
 - Explicitly allow only required read-only Git commands and selected project checks.
 - Require approval for an unclassified command rather than treating it as read-only.
 
+Configure `bitbucket-send-comments` as an approval-required tool on the dedicated `send-comments` primary agent. Keep it denied during `/deep-review` and in all three Explore tasks.
+
 The Explore tasks should inherit or receive equivalent read-only restrictions. A user manually invoking another agent is outside the automated `/deep-review` workflow and should not be treated as part of its permission guarantee.
 
 ## End-to-end process
@@ -378,6 +417,9 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 12. The Plan agent deduplicates overlapping candidates and finalizes severity.
 13. The Plan agent writes the final report once using the exact Markdown format reference.
 14. OpenCode shows the complete report to the developer.
+15. After validating the report, the developer may run `/send-comments` with selected finding numbers.
+16. The command copies the selected finding blocks exactly, removing only their location lines, and calls `bitbucket-send-comments` once.
+17. The tool resolves the matching PR, validates the reviewed head and all inline anchors, checks duplicates and posts the validated batch.
 
 ## Failure and limitation handling
 
@@ -393,6 +435,11 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 | Layer findings overlap | Deduplicate after all layers complete and preserve the strongest verified evidence. |
 | A required report field lacks verified information | Do not invent content; preserve the gap as a material limitation where applicable. |
 | Review target changes during execution | Restart with a new frozen target or report that results are not valid for one consistent revision. |
+| `/send-comments` has no latest complete report in the session | Stop without calling Bitbucket. |
+| A selected number or numeric source location is missing or ambiguous | Stop before posting any comment. |
+| No single open PR matches the repository, source branch and reviewed head | Stop before posting any comment. |
+| A selected location cannot be anchored in the current effective PR diff | Stop before posting any comment; never downgrade it to a general comment. |
+| A POST fails after earlier comments succeeded | Stop further publication and return per-comment partial status; never claim atomic rollback. |
 
 ## MVP boundaries
 
@@ -403,16 +450,18 @@ The MVP includes:
 - Three complete focused review layers.
 - Finding verification and deduplication.
 - Stable severity-prioritized text output.
-- Read-only execution.
+- Read-only review execution.
+- Explicit publication of selected numbered findings as Bitbucket Data Center inline comments.
 
 The MVP does not include:
 
 - Code changes or automated fixes.
 - GitHub or GitLab review posting.
+- Bitbucket PR discussion retrieval or PR-context augmentation of the three layer inputs.
+- Replies to, resolution of or reconciliation with existing Bitbucket threads.
 - Automatic Jira updates.
 - Long-lived Jira content storage.
 - A separate custom agent for each layer.
-- Parallel execution as a correctness requirement.
 - Automatic review of linked issues or attachments unless concrete usage proves they are required.
 
 ## Implementation and validation order
@@ -423,7 +472,9 @@ The MVP does not include:
 4. Implement the three fresh Explore invocations and verify that all layers run.
 5. Implement verification and deduplication rules.
 6. Configure least-privilege permissions.
-7. Forward-test the complete workflow on realistic review targets using fresh sessions and raw artifacts.
+7. Implement numbered report findings, `/send-comments` and `bitbucket-send-comments`.
+8. Validate PR ambiguity, stale heads, unanchorable locations, duplicate detection and partial POST failures.
+9. Forward-test the complete workflow on realistic review targets using fresh sessions and raw artifacts.
 
 Forward testing should confirm:
 
@@ -434,4 +485,4 @@ Forward testing should confirm:
 - Jira incompleteness is visible and does not become a false success claim.
 - Duplicate findings collapse without losing evidence.
 - The final Markdown follows the exact structure across equivalent verified findings.
-- No code modification or review posting occurs.
+- No code modification occurs, and review posting occurs only for numbers explicitly selected through `/send-comments`.

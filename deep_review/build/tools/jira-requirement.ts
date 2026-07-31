@@ -144,13 +144,13 @@ function buildProxyConfig(): {
   proxyHost?: string
 } {
   const proxy = alternativeEnv("HTTP_PROXY", "JIRA_PROXY_URL")
-  const username = process.env.JIRA_PROXY_USERNAME?.trim()
-  const password = process.env.JIRA_PROXY_PASSWORD?.trim()
+  const username = process.env.TOOL_PROXY_USERNAME?.trim()
+  const password = process.env.TOOL_PROXY_PASSWORD?.trim()
 
   if (!proxy) {
     if (username || password) {
       throw new SafeToolError(
-        "JIRA_PROXY_USERNAME and JIRA_PROXY_PASSWORD require a configured Jira proxy.",
+        "TOOL_PROXY_USERNAME and TOOL_PROXY_PASSWORD require a configured Jira proxy.",
       )
     }
     return {}
@@ -171,7 +171,7 @@ function buildProxyConfig(): {
 
   if ((username && !password) || (!username && password)) {
     throw new SafeToolError(
-      "Set both JIRA_PROXY_USERNAME and JIRA_PROXY_PASSWORD.",
+      "Set both TOOL_PROXY_USERNAME and TOOL_PROXY_PASSWORD.",
     )
   }
   if ((username || password) && (value.username || value.password)) {

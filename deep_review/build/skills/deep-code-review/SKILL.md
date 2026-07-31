@@ -129,6 +129,8 @@ After verification and deduplication, read [references/report-format.md](referen
 
 Write the report once in the final response, with no preamble, code fence, acknowledgement, or trailing commentary. Before responding, silently check the completed report against every rule in the format reference; correct formatting only, without adding findings, changing severity, or reinterpreting evidence.
 
+The report numbers its verified findings so that the user may explicitly select them later with `/send-comments`. Do not call a posting tool from this skill; publication remains a separate user-authorized command.
+
 ## Handle failures safely
 
 - Stop when the review target or diff cannot be resolved unambiguously.

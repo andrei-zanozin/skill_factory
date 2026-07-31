@@ -9,10 +9,13 @@ actor Developer
 
 package "OpenCode" {
   component "<b>/deep-review</b> command\n(custom prompt entry)" as Command <<custom>>
+  component "<b>/send-comments</b> command\n(explicit numbered selection)" as SendComments <<custom>>
+  component "Send-comments agent\n(custom primary, least privilege)\nreport selection and tool invocation" as SendAgent <<custom>>
 
   component "Plan agent\n(built-in primary)\norchestration, result verification,\ndeduplication and final report formatting" as Plan <<built-in>>
 
   component "<b>jira-requirement</b> tool\n(custom TypeScript tool)\nJira Data Center REST, validation,\npagination and normalized JSON" as JiraTool <<custom>>
+  component "<b>bitbucket-send-comments</b> tool\n(custom TypeScript tool)\nPR/head preflight, diff anchors,\nduplicate check and inline posting" as BitbucketTool <<custom>>
 
   artifact "Requirement context\nuntrusted Jira data, provenance,\ncompleteness status and warnings" as RequirementContext
 
@@ -38,6 +41,7 @@ package "OpenCode" {
 }
 
 database "Customer Jira Data Center" as Jira
+database "Customer Bitbucket Data Center" as Bitbucket
 
 Developer -right-> Command
 Command -down-> Plan : target + requirement
@@ -76,6 +80,12 @@ LayerResults -up-> Plan : all layers completed
 
 Plan -right-> Report : verified and deduplicated findings\nstrict model-rendered Markdown
 Report -left-> Developer
+Developer -down-> SendComments : /send-comments 1, 3\nafter report validation
+Report ..> SendComments : latest numbered report\nin the same session
+SendComments -down-> SendAgent : explicit selected numbers
+SendAgent -down-> BitbucketTool : exact selected blocks\nwithout Location lines
+BitbucketTool -down-> Bitbucket : resolve PR, validate current head,\nread effective diff and post inline
+BitbucketTool -up-> Developer : per-comment status + links
 
 note right of Plan
   Configure the built-in Plan agent for this workflow:
@@ -115,8 +125,18 @@ note right of JiraTool
 end note
 
 note bottom of Report
-  MVP boundary: report only in the OpenCode session.
-  No GitHub/GitLab review posting or code modification.
+  Number verified findings consecutively.
+  /deep-review remains read-only; only /send-comments
+  can request publication of explicit numbers.
+end note
+
+note right of BitbucketTool
+  Validate the complete selected batch before writing.
+  Keep the exact report finding format and remove only Location.
+  Fail on stale head, ambiguous PR or missing inline anchor.
+  Use HTTPS_PROXY with TOOL_PROXY_USERNAME
+  and TOOL_PROXY_PASSWORD; never expose credentials.
+  Phase 2 PR-context augmentation is not included.
 end note
 
 @enduml

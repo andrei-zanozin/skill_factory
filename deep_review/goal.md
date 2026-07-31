@@ -23,6 +23,6 @@ Every layer should complete even when another layer finds issues. Findings shoul
 
 Jira requirement retrieval should be deterministic. Jira content should be treated as untrusted external data with explicit completeness status, while the model should write the final report once, strictly follow the stable Markdown format, and preserve verified evidence without introducing new review judgments.
 
-The MVP should be read-only: it should not modify code or post review comments to GitHub, GitLab or other external systems.
+The review workflow should remain read-only and should not modify code or post comments by itself. After the developer validates the final numbered report, the separate `/send-comments` command may post only the explicitly selected findings as Bitbucket inline comments.
 
 The ultimate objective is to capture and reproduce the user's layered review process so the OpenCode skill can execute code reviews with similar depth, judgment, and quality.
