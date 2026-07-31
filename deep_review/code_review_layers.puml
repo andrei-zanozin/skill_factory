@@ -2,7 +2,7 @@
 
 title Code Review Layers
 
-note "Run every layer as a fresh focused review task with the same review input.\nComplete every step and collect all layer-related issues independently.\nDo not stop when a layer finds issues and do not pass findings between layers.\nVerify, deduplicate and report findings only after all three layers complete." as LayerNote
+note "Run all three layers in parallel as fresh focused review tasks with the same review input.\nRequire overlapping child-session execution; never fall back to sequential execution.\nComplete every step and collect all layer-related issues independently.\nDo not stop when a layer finds issues and do not pass findings between layers.\nVerify, deduplicate and report findings only after all three layers complete." as LayerNote
 
 rectangle "1. Solution and architecture" {
   rectangle "Understand the requirement" as Requirements

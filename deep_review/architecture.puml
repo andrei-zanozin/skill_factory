@@ -99,7 +99,9 @@ note bottom of ReviewInput
 end note
 
 note bottom of LayerResults
-  Run and complete all three layers even when one finds issues.
+  Dispatch and run all three layers in parallel, with overlapping
+  child-session execution, even when one finds issues. Stop with a
+  parallel-run failure if overlap cannot be confirmed; never fall back.
   Preserve each finding's layer and evidence. The Plan agent
   verifies and deduplicates only after all results are available.
 end note

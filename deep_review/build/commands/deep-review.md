@@ -13,4 +13,4 @@ Keep the operation read-only. Validate the branch name before using it and never
 
 Resolve the branch head to an immutable revision. Determine the repository's default branch and use their merge base as the immutable comparison revision. Stop and report the ambiguity if the default branch or either revision cannot be resolved safely. Do not check out, switch, reset, or modify the target branch.
 
-Load the `deep-code-review` skill. Use the resolved branch diff, immutable revisions, and normalized Jira result as the frozen review input, run the complete skill workflow, and return only its final review report.
+Load the `deep-code-review` skill. Use the resolved branch diff, immutable revisions, and normalized Jira result as the frozen review input, then run the complete skill workflow. Enforce all of the skill's orchestration gates; if any gate fails, stop instead of producing a review report. Otherwise, return only the skill's final review report.

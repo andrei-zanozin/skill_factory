@@ -63,8 +63,10 @@ The built-in Plan agent is the primary orchestrator. It should:
 - Resolve the exact diff base and head.
 - Read applicable repository guidance such as `AGENTS.md`.
 - Assemble one shared `ReviewInput`.
-- Invoke three fresh Explore tasks, one for each layer.
+- Invoke three fresh Explore tasks in parallel, one for each layer, without consuming any result before all three are dispatched.
+- Treat creation and overlapping execution of three distinct child sessions as hard gates; never perform a layer investigation or construct a `LayerResult` in the parent session.
 - Wait for all three `LayerResult` objects.
+- Stop with a parallel-run failure when dispatch is sequential, overlap cannot be confirmed, or any child session or valid layer result is missing; never fall back or synthesize a substitute.
 - Verify candidate findings against source code, diff and test evidence.
 - Deduplicate overlapping findings.
 - Preserve the strongest evidence and appropriate severity.
@@ -103,7 +105,9 @@ Each task receives:
 
 Each task should inspect the repository independently and return its own findings, evidence, coverage, checks and limitations. Do not pass findings from one layer into another layer because that can anchor later investigation and reduce independent discovery.
 
-The three tasks may run sequentially in the first implementation for easier observability. They can later run in parallel if OpenCode execution and repository checks are safe to parallelize. Parallelization must not change their inputs or output contract.
+The Plan agent must use one distinct `task` call per layer and must not perform the layer investigation or construct the layer's result itself. It must dispatch all three calls before consuming any result. Before verification, it must confirm that all three child-session execution intervals overlapped and that each session returned exactly one schema-valid `LayerResult` for the assigned layer. If either gate fails, the workflow reports `Parallel review orchestration failed: <reason>`, stops, and does not produce a review report from parent-generated or inferred substitutes.
+
+Parallel execution is mandatory. Never run the layer tasks sequentially and never fall back to sequential execution. Parallelization must not change their inputs or output contract.
 
 Using three custom subagent definitions is not required for the MVP. Three fresh Explore invocations with separate layer rubrics provide the intended focus with less configuration. Introduce a custom review subagent only if forward testing shows that the built-in Explore behavior is not deep or consistent enough.
 
@@ -367,20 +371,21 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 5. The Jira tool validates, retrieves, paginates and normalizes requirement data.
 6. The Plan agent records completeness, warnings and review limitations.
 7. The Plan agent freezes the shared `ReviewInput`.
-8. The Plan agent invokes a fresh Explore task for Solution and architecture.
-9. The Plan agent invokes a fresh Explore task for Unit correctness.
-10. The Plan agent invokes a fresh Explore task for Code polish.
-11. Every task completes regardless of findings in another task.
-12. The Plan agent verifies all candidates against the frozen target.
-13. The Plan agent deduplicates overlapping candidates and finalizes severity.
-14. The Plan agent writes the final report once using the exact Markdown format reference.
-15. OpenCode shows the complete report to the developer.
+8. The Plan agent dispatches fresh Explore tasks for Solution and architecture, Unit correctness, and Code polish in parallel before consuming any result.
+9. The Plan agent confirms that all three child-session execution intervals overlapped and that each session returned exactly one valid result for the assigned layer.
+10. Every task completes regardless of findings in another task.
+11. The Plan agent verifies all candidates against the frozen target.
+12. The Plan agent deduplicates overlapping candidates and finalizes severity.
+13. The Plan agent writes the final report once using the exact Markdown format reference.
+14. OpenCode shows the complete report to the developer.
 
 ## Failure and limitation handling
 
 | Situation | Required behavior |
 | --- | --- |
 | Review target or diff cannot be resolved | Stop; do not review an ambiguous target. |
+| Parallel dispatch or overlapping execution of all three Explore tasks cannot be confirmed | Report `Parallel review orchestration failed: <reason>` and stop; never fall back to sequential execution. |
+| A required Explore child session or valid `LayerResult` is missing | Report `Parallel review orchestration failed: <reason>` and stop; never synthesize a substitute in the Plan session. |
 | Jira issue is unavailable or incomplete | Mark requirement validation incomplete; still run all layers when repository context is valid. |
 | Jira content exceeds the safe output budget | Report explicit incompleteness; never silently truncate or invent a complete summary. |
 | A project check cannot run | Record the failed or skipped check and reason; continue static review where possible. |

@@ -74,7 +74,9 @@ Freeze this object before layer discovery. If the target changes during the revi
 
 ### 2. Run three independent layers
 
-Start three fresh, isolated, read-only review processes, one per rubric. Use whatever isolation mechanism the environment provides. Sequential execution is acceptable; run in parallel only when repository checks are safe to parallelize. Execution order must not affect inputs or results.
+Isolation and parallel execution are hard gates. Invoke the `task` tool once per layer with `subagent_type` set to `explore`, creating three distinct child sessions. Each of Layers 1, 2, and 3 MUST execute in its own fresh, isolated, read-only Explore task. The parent MUST NOT perform a layer investigation or construct a `LayerResult` itself.
+
+Dispatch all three task calls without waiting for or consuming any earlier layer result. All three child-session execution intervals MUST overlap, so there is a period when all three layers are running concurrently. Never run the layers sequentially and never fall back to sequential execution. Execution order must not affect inputs or results.
 
 For each review process:
 
@@ -94,6 +96,15 @@ Do not modify files or post comments. Return only one LayerResult object.
 ```
 
 If a review process is blocked, preserve its blocked result, coverage, and reason; continue the other processes.
+
+Before verification or consolidation, confirm all of the following:
+
+- Three distinct child sessions were created, one for each required layer.
+- All three task calls were dispatched before any layer result was consumed, and all three child-session execution intervals overlapped.
+- Each child session returned exactly one schema-valid `LayerResult` for its assigned layer.
+- No child result was replaced, completed, or inferred by the parent.
+
+If the `task` tool or `explore` subagent is unavailable, parallel dispatch is unavailable, any layer result is consumed before all three calls are dispatched, the three child-session execution intervals do not overlap or overlap cannot be confirmed, a child session is not created, or any result is missing or invalid, report `Parallel review orchestration failed: <reason>` and stop instead of producing a review report. Never synthesize, imitate, or replace a missing `LayerResult` in the parent session. A schema-valid blocked result satisfies the return requirement only when its child task participated in the confirmed parallel run and does not stop the other layers.
 
 ### 3. Verify every candidate
 
@@ -121,6 +132,7 @@ Write the report once in the final response, with no preamble, code fence, ackno
 ## Handle failures safely
 
 - Stop when the review target or diff cannot be resolved unambiguously.
+- Stop with `Parallel review orchestration failed: <reason>` when parallel dispatch and overlapping execution of three distinct Explore child sessions cannot be confirmed, or when three valid layer results are unavailable; never fall back to sequential execution or continue with parent-generated substitutes.
 - Continue Layers 2 and 3 when requirement context is incomplete; require Layer 1 and the final summary to state that requirement validation is incomplete.
 - Record skipped or failed checks and their reasons; continue static review where useful.
 - Continue other layers when one layer is blocked.
