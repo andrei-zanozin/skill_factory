@@ -13,7 +13,7 @@ The MVP is read-only. It produces a review report in the OpenCode session and do
 3. Give every layer the same frozen requirement and code-change scope.
 4. Do not share findings between layers during discovery.
 5. Verify and deduplicate only after all layer results are available.
-6. Use model judgment for review work and deterministic code for fragile integration and formatting work.
+6. Use model judgment for review work and final report formatting, with an exact format contract and a single output pass.
 7. Treat Jira descriptions and comments as untrusted external data.
 8. Preserve evidence, coverage and limitations so the report does not claim more certainty than the review established.
 
@@ -33,13 +33,13 @@ The final paths can be adjusted to the chosen project or global OpenCode install
 │           ├── unit-correctness.md
 │           ├── code-polish.md
 │           ├── layer-result-contract.md
-│           └── report-contract.md
+│           ├── report-contract.md
+│           └── report-format.md
 └── tools/
-    ├── jira-requirement.ts
-    └── render-review-report.ts
+    └── jira-requirement.ts
 ```
 
-Both custom tools should be implemented directly in TypeScript, which is OpenCode's native custom-tool format. This keeps argument schemas, deterministic behavior and execution in one place without introducing another runtime or dependency-management layer.
+The custom Jira tool should be implemented directly in TypeScript, which is OpenCode's native custom-tool format. This keeps argument schemas, deterministic behavior and execution in one place without introducing another runtime or dependency-management layer.
 
 ## Component responsibilities
 
@@ -68,7 +68,7 @@ The built-in Plan agent is the primary orchestrator. It should:
 - Verify candidate findings against source code, diff and test evidence.
 - Deduplicate overlapping findings.
 - Preserve the strongest evidence and appropriate severity.
-- Send only the final structured result to the deterministic renderer.
+- Write the final inline report directly from the verified, deduplicated findings using the exact report-format reference.
 
 The Plan agent should not stop the workflow because one layer found issues.
 
@@ -325,34 +325,23 @@ When two layers identify the same root cause:
 - Combine distinct impacts only when they come from the same defect.
 - Keep separate findings when fixes or failure modes are materially different.
 
-The Plan agent may reject, lower or clarify a candidate based on verification. It should not ask the renderer to make those decisions.
+The Plan agent may reject, lower or clarify a candidate based on verification. It should finalize those decisions before writing the report.
 
-## Deterministic report rendering
+## Stable model-rendered report
 
-Stable output remains an explicit architectural responsibility, but it does not need a separate formatting skill.
+The Plan agent should write the final inline Markdown directly from the verified, deduplicated findings. It should read the exact report-format reference only after consolidation and follow its headings, labels, ordering, spacing, optional sections and no-findings form literally.
 
-The `render-review-report` tool should accept the verified, deduplicated structured result and:
+The Plan agent should:
 
-- Validate the input schema.
 - Sort findings into `Critical`, `Major` and `Minor`.
-- Apply a deterministic secondary ordering, such as file and line.
+- Apply the required secondary ordering by file, starting line, symbol and title.
 - Omit empty severity groups.
-- Render every finding with location, problem/impact and suggested fix.
-- Render `No issues found.` when there are no findings.
-- Preserve finding meaning and evidence.
-- Reject malformed input instead of guessing missing content.
+- Render every finding with location, problem and impact, suggested fix and evidence.
+- Render `No issues found.` when there are no verified findings.
+- Preserve all material limitations.
+- Silently check the completed report against the format reference before responding.
 
-The report should start with the accepted brief pull-request summary. Any material review limitation should be stated concisely in that summary. Findings should then use the accepted severity-group contract.
-
-The renderer must not:
-
-- Discover new findings.
-- Change severity based on its own judgment.
-- Rewrite evidence into a different claim.
-- Modify code.
-- Post review comments.
-
-Using deterministic rendering provides a stronger format guarantee than asking a second model-loaded skill to reformat prose.
+The Plan agent must not introduce a separate formatting stage or alter finalized findings while writing the report.
 
 ## Permissions
 
@@ -361,7 +350,6 @@ Configure the Plan agent with least privilege:
 - Deny file edits, writes and patches.
 - Deny GitHub/GitLab review-posting integrations.
 - Allow the `jira-requirement` tool.
-- Allow the `render-review-report` tool.
 - Deny all task targets by default and allow only Explore.
 - Allow repository reads, searches and required LSP access.
 - Deny shell commands by default.
@@ -385,9 +373,8 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 11. Every task completes regardless of findings in another task.
 12. The Plan agent verifies all candidates against the frozen target.
 13. The Plan agent deduplicates overlapping candidates and finalizes severity.
-14. The Plan agent sends the structured final result to `render-review-report`.
-15. The renderer validates and produces stable Markdown.
-16. OpenCode shows the complete report to the developer.
+14. The Plan agent writes the final report once using the exact Markdown format reference.
+15. OpenCode shows the complete report to the developer.
 
 ## Failure and limitation handling
 
@@ -399,7 +386,7 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 | A project check cannot run | Record the failed or skipped check and reason; continue static review where possible. |
 | A layer is blocked | Return a blocked `LayerResult` with coverage and reason; continue the other layers. |
 | Layer findings overlap | Deduplicate after all layers complete and preserve the strongest verified evidence. |
-| Renderer input is invalid | Reject rendering and return the schema error to the Plan agent; do not emit a malformed report. |
+| A required report field lacks verified information | Do not invent content; preserve the gap as a material limitation where applicable. |
 | Review target changes during execution | Restart with a new frozen target or report that results are not valid for one consistent revision. |
 
 ## MVP boundaries
@@ -425,14 +412,13 @@ The MVP does not include:
 
 ## Implementation and validation order
 
-1. Define the `ReviewInput`, `LayerResult` and final renderer schemas.
+1. Define the `ReviewInput`, `LayerResult`, verified-review and exact Markdown format contracts.
 2. Implement and test `jira-requirement` with representative Jira responses, pagination, permission errors and oversized content.
 3. Implement the concise `deep-code-review` skill and direct layer references.
 4. Implement the three fresh Explore invocations and verify that all layers run.
 5. Implement verification and deduplication rules.
-6. Implement and test the deterministic renderer.
-7. Configure least-privilege permissions.
-8. Forward-test the complete workflow on realistic review targets using fresh sessions and raw artifacts.
+6. Configure least-privilege permissions.
+7. Forward-test the complete workflow on realistic review targets using fresh sessions and raw artifacts.
 
 Forward testing should confirm:
 
@@ -442,5 +428,5 @@ Forward testing should confirm:
 - The same target revisions reach all layers.
 - Jira incompleteness is visible and does not become a false success claim.
 - Duplicate findings collapse without losing evidence.
-- The final Markdown remains stable across equivalent structured inputs.
+- The final Markdown follows the exact structure across equivalent verified findings.
 - No code modification or review posting occurs.

@@ -21,7 +21,7 @@ The review should run all three layers as separate, fresh, focused review tasks 
 
 Every layer should complete even when another layer finds issues. Findings should remain independent during discovery, then be verified, deduplicated and combined into one complete severity-prioritized report.
 
-Jira requirement retrieval and final report rendering should be deterministic. Jira content should be treated as untrusted external data with explicit completeness status, while the final renderer should preserve verified evidence and produce the stable report contract without introducing new review judgments.
+Jira requirement retrieval should be deterministic. Jira content should be treated as untrusted external data with explicit completeness status, while the model should write the final report once, strictly follow the stable Markdown format, and preserve verified evidence without introducing new review judgments.
 
 The MVP should be read-only: it should not modify code or post review comments to GitHub, GitLab or other external systems.
 

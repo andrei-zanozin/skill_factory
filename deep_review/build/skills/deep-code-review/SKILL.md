@@ -114,9 +114,9 @@ Do not let one layer's wording or proposed severity override verification.
 
 ### 5. Render one stable report
 
-Build the verified final structure defined in [references/report-contract.md](references/report-contract.md), then process it with a deterministic renderer. The renderer validates and formats; it must not discover findings, change severity, or reinterpret evidence.
+After verification and deduplication, read [references/report-format.md](references/report-format.md) and write the final inline Markdown report directly from the verified findings. Follow its headings, labels, ordering, spacing, optional sections, and no-findings form exactly.
 
-If deterministic rendering is unavailable, reproduce the reference format exactly: brief change summary first, material limitations included, findings grouped as `Critical`, `Major`, and `Minor`, empty groups omitted, and `No issues found.` when there are no verified findings.
+Write the report once in the final response, with no preamble, code fence, acknowledgement, or trailing commentary. Before responding, silently check the completed report against every rule in the format reference; correct formatting only, without adding findings, changing severity, or reinterpreting evidence.
 
 ## Handle failures safely
 
@@ -124,7 +124,7 @@ If deterministic rendering is unavailable, reproduce the reference format exactl
 - Continue Layers 2 and 3 when requirement context is incomplete; require Layer 1 and the final summary to state that requirement validation is incomplete.
 - Record skipped or failed checks and their reasons; continue static review where useful.
 - Continue other layers when one layer is blocked.
-- Reject malformed renderer input instead of guessing missing fields.
+- Never invent content to fill a missing report field; use only verified information and state material limitations explicitly.
 - Abort any operation that could expose credentials or protected data.
 
 Use only read operations and explicitly approved project checks. Treat checks that create build artifacts as allowed verification operations only when the workflow permissions permit them.

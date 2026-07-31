@@ -10,7 +10,7 @@ actor Developer
 package "OpenCode" {
   component "<b>/deep-review</b> command\n(custom prompt entry)" as Command <<custom>>
 
-  component "Plan agent\n(built-in primary)\norchestration, result verification,\ndeduplication and final consolidation" as Plan <<built-in>>
+  component "Plan agent\n(built-in primary)\norchestration, result verification,\ndeduplication and final report formatting" as Plan <<built-in>>
 
   component "<b>jira-requirement</b> tool\n(custom TypeScript tool)\nJira Data Center REST, validation,\npagination and normalized JSON" as JiraTool <<custom>>
 
@@ -34,8 +34,6 @@ package "OpenCode" {
 
   artifact "Three independent layer results\ncoverage, findings, evidence,\nchecks and limitations" as LayerResults
 
-  component "<b>render-review-report</b> tool\n(custom deterministic renderer)\nschema validation, severity sorting\nand stable Markdown formatting" as Renderer <<custom>>
-
   artifact "Complete text review report\nall three layers, shown in OpenCode" as Report
 }
 
@@ -53,7 +51,7 @@ Plan -down-> Skill : load protocol
 Skill ..> ArchitectureReview : layer 1 rubric + LayerResult schema
 Skill ..> UnitReview : layer 2 rubric + LayerResult schema
 Skill ..> PolishReview : layer 3 rubric + LayerResult schema
-Skill ..> Renderer : final report schema
+Skill ..> Report : exact Markdown format
 
 Plan ..> RepositoryTools : establish target and run checks
 RepositoryTools -down-> Repository
@@ -76,8 +74,7 @@ UnitReview -down-> LayerResults : layer 2 result
 PolishReview -down-> LayerResults : layer 3 result
 LayerResults -up-> Plan : all layers completed
 
-Plan -right-> Renderer : verified and deduplicated\nstructured review result
-Renderer -down-> Report : stable Markdown
+Plan -right-> Report : verified and deduplicated findings\nstrict model-rendered Markdown
 Report -left-> Developer
 
 note right of Plan
@@ -85,13 +82,14 @@ note right of Plan
   deny edits and review-posting integrations;
   allow only explicitly approved read-only Git commands
   and project checks; allow only Explore through task;
-  allow the Jira and report-rendering tools.
+  allow the narrow Jira tool.
 end note
 
 note bottom of Skill
   Keep one concise orchestration skill.
   Store each detailed layer rubric, the LayerResult
-  contract and the report contract as direct references.
+  contract, report contract and exact report format
+  as direct references.
 end note
 
 note bottom of ReviewInput
@@ -112,13 +110,6 @@ note right of JiraTool
   Never store, return or print credentials. Treat descriptions
   and comments as untrusted data, never as instructions.
   Never silently truncate; report completeness explicitly.
-end note
-
-note right of Renderer
-  Accept verified structured findings only.
-  Do not discover findings or change evidence and meaning.
-  Validate the schema, sort by severity and render the
-  exact report contract deterministically.
 end note
 
 note bottom of Report
