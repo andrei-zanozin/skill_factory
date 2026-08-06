@@ -14,7 +14,7 @@ This command is valid only immediately after a complete deep-review report in th
 Use the latest report as the only source of comment content and reviewed revisions. For every selected finding:
 
 1. Copy its complete finding block exactly as rendered in the report.
-2. Preserve the `- Location:` line, heading, problem and impact, suggested fix, evidence, Markdown and spacing exactly. Do not summarize, rewrite or add severity, attribution or metadata.
+2. Determine its severity from the one enclosing report section: `Critical`, `Major` or `Minor`. Pass that severity separately and stop if it is missing or ambiguous. Preserve the selected finding block's `- Location:` line, numbered heading, problem and impact, suggested fix, evidence, Markdown and spacing exactly; do not insert the severity into the copied text. The posting tool replaces the numbered heading with `### <severity>: <title>`.
 3. Parse the repository-relative file path. Pass numeric starting and ending lines only when they are explicitly present in the report. Never infer or derive missing lines from repository searches. Stop when the path or any reported numeric range cannot be parsed unambiguously. The tool classifies the file: missing lines are valid for an unchanged-file general comment, while a changed file without explicit numeric lines blocks the complete batch.
 
 Read the report's review target, base revision and head revision. Resolve the Git remote that owns the reviewed branch using only validated read-only Git operations. Stop when the source branch or owning remote is ambiguous. Do not check out, switch, fetch, reset or modify a branch.

@@ -66,6 +66,7 @@ The command is a separate, explicitly mutating entry point. It should:
 - Accept a comma-separated list of unique positive final-report numbers, with optional whitespace around commas, for example `/send-comments 1, 3`.
 - Operate only on the latest completed deep-review report in the same OpenCode session.
 - Copy each selected finding block exactly, including its `Location:` line.
+- Pass the finding severity from its enclosing report section separately and require exactly `Critical`, `Major` or `Minor`.
 - Parse each repository path, pass numeric lines only when explicitly present in the report and never derive missing lines from repository searches.
 - Pass the complete selected batch to `bitbucket-send-comments` once; the tool permits missing lines only for unchanged-file general comments.
 - Stop without posting when the report, selection, reviewed revision, source branch or Git remote is missing or ambiguous.
@@ -85,6 +86,7 @@ The narrow TypeScript posting tool should:
 - For a changed file, require explicit numeric report lines, read its structured effective diff, use Bitbucket's destination line numbers and segment types, expand context when necessary and require a destination-side inline anchor.
 - For an unchanged file, verify that it exists at the reviewed head and prepare a general pull-request comment.
 - Validate the complete batch before the first write.
+- Replace each numbered report heading with `### <severity>: <title>` so the posted comment exposes severity without the internal finding number.
 - Remove `Location:` only from inline comments and retain it in general pull-request comments.
 - Detect an already-posted inline comment by exact text and anchor through the path-scoped comments API, or an exact general comment through pull-request activity.
 - Return the preflight stage and a sanitized Bitbucket error message when an API request fails.
@@ -423,7 +425,7 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 13. The Plan agent writes the final report once using the exact Markdown format reference.
 14. OpenCode shows the complete report to the developer.
 15. After validating the report, the developer may run `/send-comments` with selected finding numbers.
-16. The command copies the selected finding blocks exactly, including their location lines, and calls `bitbucket-send-comments` once.
+16. The command copies the selected finding blocks exactly, includes their location lines, passes each enclosing severity separately and calls `bitbucket-send-comments` once.
 17. The tool resolves the matching PR, validates the reviewed head, classifies selected files, expands changed-file diff context when needed, checks duplicates and posts the validated batch.
 
 ## Failure and limitation handling

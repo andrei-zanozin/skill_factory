@@ -83,7 +83,7 @@ Report -left-> Developer
 Developer -down-> SendComments : /send-comments 1, 3\nafter report validation
 Report ..> SendComments : latest numbered report\nin the same session
 SendComments -down-> SendAgent : explicit selected numbers
-SendAgent -down-> BitbucketTool : exact selected blocks\nincluding Location lines
+SendAgent -down-> BitbucketTool : exact selected blocks + severity\nincluding Location lines
 BitbucketTool -down-> Bitbucket : changed file: inline with expanded context\nunchanged file: general PR comment
 BitbucketTool -up-> Developer : per-comment status + links
 
@@ -132,6 +132,7 @@ end note
 
 note right of BitbucketTool
   Validate the complete selected batch before writing.
+  Render severity-only comment headings without finding numbers.
   Remove Location only from inline comments.
   Require report lines only for changed-file inline placement.
   Parse structured diff destination lines and segment types.

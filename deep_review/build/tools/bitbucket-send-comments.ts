@@ -13,9 +13,11 @@ const FULL_REVISION = /^[0-9a-f]{40,64}$/i
 const SAFE_REPOSITORY_PART = /^[A-Za-z0-9._~-]+$/
 
 type JsonRecord = Record<string, unknown>
+type FindingSeverity = "Critical" | "Major" | "Minor"
 
 type CommentInput = {
   number: number
+  severity: FindingSeverity
   path: string
   startLine?: number
   endLine?: number
@@ -259,14 +261,19 @@ function normalizeRepositoryPath(value: string): string {
 
 function validateCommentText(
   number: number,
+  severity: FindingSeverity,
   value: string,
-): { fullText: string; inlineText: string } {
+): {
+  fullText: string
+  inlineText: string
+} {
   const text = value.replace(/\r\n/g, "\n").trim()
   if (new TextEncoder().encode(text).byteLength > MAX_COMMENT_BYTES) {
     throw new SafeToolError(`Comment ${number} exceeds the safe size limit.`)
   }
   const lines = text.split("\n")
-  if (!lines[0]?.startsWith(`### ${number}. `)) {
+  const headingPrefix = `### ${number}. `
+  if (!lines[0]?.startsWith(headingPrefix)) {
     throw new SafeToolError(
       `Comment ${number} must keep its exact numbered finding heading from the report.`,
     )
@@ -298,10 +305,25 @@ function validateCommentText(
       `Comment ${number} does not preserve the final-report finding format.`,
     )
   }
-  return {
-    fullText: text,
-    inlineText: lines.filter((_, index) => index !== location).join("\n"),
+  const postedLines = [...lines]
+  postedLines[0] = `### ${severity}: ${lines[0].slice(headingPrefix.length)}`
+  const fullText = postedLines.join("\n")
+  if (new TextEncoder().encode(fullText).byteLength > MAX_COMMENT_BYTES) {
+    throw new SafeToolError(`Comment ${number} exceeds the safe size limit after formatting.`)
   }
+  return {
+    fullText,
+    inlineText: postedLines.filter((_, index) => index !== location).join("\n"),
+  }
+}
+
+function validateFindingSeverity(value: unknown, number: number): FindingSeverity {
+  if (value !== "Critical" && value !== "Major" && value !== "Minor") {
+    throw new SafeToolError(
+      `Comment ${number} severity must be Critical, Major or Minor.`,
+    )
+  }
+  return value
 }
 
 function validateComments(value: unknown): ValidatedComment[] {
@@ -351,9 +373,11 @@ function validateComments(value: unknown): ValidatedComment[] {
     if (typeof raw.path !== "string" || typeof raw.text !== "string") {
       throw new SafeToolError(`Comment ${number} requires path and text strings.`)
     }
-    const commentText = validateCommentText(number as number, raw.text)
+    const severity = validateFindingSeverity(raw.severity, number as number)
+    const commentText = validateCommentText(number as number, severity, raw.text)
     return {
       number: number as number,
+      severity,
       path: normalizeRepositoryPath(raw.path),
       startLine: hasStartLine ? (startLine as number) : null,
       endLine: hasEndLine ? (endLine as number) : null,
@@ -1107,7 +1131,10 @@ async function findDuplicateInlineComment(
       if (!isRecord(value)) {
         continue
       }
-      if (value.text === prepared.text && sameAnchor(value.anchor, prepared.anchor)) {
+      if (
+        value.text === prepared.text &&
+        sameAnchor(value.anchor, prepared.anchor)
+      ) {
         return requireInteger(value.id, "comment id")
       }
     }
@@ -1476,7 +1503,7 @@ export async function sendBitbucketComments(args: {
 // directly and does not need the @opencode-ai/plugin helper at runtime.
 export default {
   description:
-    "Post explicitly selected findings as Bitbucket Data Center inline comments for changed files or general pull request comments for unchanged files after complete preflight validation.",
+    "Post explicitly selected findings with severity-labelled headings as Bitbucket Data Center inline comments for changed files or general pull request comments for unchanged files after complete preflight validation.",
   args: {
     repositoryUrl: {
       type: "string",
@@ -1500,9 +1527,14 @@ export default {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["number", "path", "text"],
+        required: ["number", "severity", "path", "text"],
         properties: {
           number: { type: "integer", minimum: 1 },
+          severity: {
+            type: "string",
+            enum: ["Critical", "Major", "Minor"],
+            description: "Finding severity from its enclosing final-report section",
+          },
           path: { type: "string", minLength: 1 },
           startLine: {
             type: "integer",
