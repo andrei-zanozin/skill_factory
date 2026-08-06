@@ -2,7 +2,10 @@ const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_RETRIES = 3
 const DEFAULT_RETRY_DELAY_MS = 5_000
 const DEFAULT_PAGE_SIZE = 100
+const CHANGE_PAGE_SIZE = 1_000
+const INITIAL_DIFF_CONTEXT_LINES = 10
 const DEFAULT_MAX_RESPONSE_BYTES = 20_000_000
+const MAX_DIFF_CONTEXT_LINES = 2_147_483_647
 const MAX_PAGES = 10_000
 const MAX_COMMENTS_PER_REQUEST = 50
 const MAX_COMMENT_BYTES = 100_000
@@ -14,14 +17,22 @@ type JsonRecord = Record<string, unknown>
 type CommentInput = {
   number: number
   path: string
-  startLine: number
-  endLine: number
+  startLine?: number
+  endLine?: number
   text: string
 }
 
-type ValidatedComment = CommentInput & {
+type ValidatedComment = Omit<CommentInput, "text"> & {
   path: string
-  text: string
+  startLine: number | null
+  endLine: number | null
+  fullText: string
+  inlineText: string
+}
+
+type InlineValidatedComment = ValidatedComment & {
+  startLine: number
+  endLine: number
 }
 
 type RepositoryIdentity = {
@@ -40,6 +51,12 @@ type PullRequestIdentity = {
   targetBranch: string
 }
 
+type PullRequestChange = {
+  path: string
+  srcPath?: string
+  type: string
+}
+
 type InlineAnchor = {
   diffType: "EFFECTIVE"
   path: string
@@ -49,11 +66,22 @@ type InlineAnchor = {
   fileType: "TO"
 }
 
-type PreparedComment = {
+type PreparedInlineComment = {
   input: ValidatedComment
+  placement: "inline"
+  text: string
   anchor: InlineAnchor
   alreadyPostedId: number | null
 }
+
+type PreparedGeneralComment = {
+  input: ValidatedComment
+  placement: "general"
+  text: string
+  alreadyPostedId: number | null
+}
+
+type PreparedComment = PreparedInlineComment | PreparedGeneralComment
 
 type RequestConfig = {
   token: string
@@ -67,6 +95,7 @@ type RequestConfig = {
 
 type PublicationItem = {
   number: number
+  placement: "inline" | "general" | null
   status: "posted" | "already-posted" | "failed" | "not-attempted"
   commentId: number | null
   url: string | null
@@ -74,7 +103,7 @@ type PublicationItem = {
 }
 
 type PublicationResult = {
-  schemaVersion: "1"
+  schemaVersion: "2"
   status: "completed" | "partial" | "blocked"
   pullRequest: {
     projectKey: string
@@ -228,7 +257,10 @@ function normalizeRepositoryPath(value: string): string {
   return path
 }
 
-function validateCommentText(number: number, value: string): string {
+function validateCommentText(
+  number: number,
+  value: string,
+): { fullText: string; inlineText: string } {
   const text = value.replace(/\r\n/g, "\n").trim()
   if (new TextEncoder().encode(text).byteLength > MAX_COMMENT_BYTES) {
     throw new SafeToolError(`Comment ${number} exceeds the safe size limit.`)
@@ -239,9 +271,10 @@ function validateCommentText(number: number, value: string): string {
       `Comment ${number} must keep its exact numbered finding heading from the report.`,
     )
   }
-  if (lines.some((line) => line.startsWith("- Location:"))) {
-    throw new SafeToolError(`Comment ${number} still contains its Location line.`)
+  if (lines.filter((line) => line.startsWith("- Location:")).length !== 1) {
+    throw new SafeToolError(`Comment ${number} must contain exactly one Location line.`)
   }
+  const location = lines.findIndex((line) => line.startsWith("- Location:"))
   const problem = lines.findIndex((line) => line.startsWith("- Problem and impact:"))
   const fix = lines.findIndex((line) => line.startsWith("- Suggested fix:"))
   const evidence = lines.findIndex((line) => line.startsWith("- Evidence:"))
@@ -252,18 +285,23 @@ function validateCommentText(number: number, value: string): string {
     lines.slice(evidence + 1).every((line) => line.startsWith("  - "))
   if (
     lines[1] !== "" ||
-    problem !== 2 ||
-    fix !== 3 ||
-    evidence !== 4 ||
+    location !== 2 ||
+    problem !== 3 ||
+    fix !== 4 ||
+    evidence !== 5 ||
+    !lines[location].startsWith("- Location: ") ||
     !lines[problem].startsWith("- Problem and impact: ") ||
     !lines[fix].startsWith("- Suggested fix: ") ||
-    !((singleEvidence && lines.length === 5) || evidenceList)
+    !((singleEvidence && lines.length === 6) || evidenceList)
   ) {
     throw new SafeToolError(
       `Comment ${number} does not preserve the final-report finding format.`,
     )
   }
-  return text
+  return {
+    fullText: text,
+    inlineText: lines.filter((_, index) => index !== location).join("\n"),
+  }
 }
 
 function validateComments(value: unknown): ValidatedComment[] {
@@ -291,28 +329,47 @@ function validateComments(value: unknown): ValidatedComment[] {
       throw new SafeToolError(`Comment number ${number} was selected more than once.`)
     }
     numbers.add(number as number)
-    if (!Number.isSafeInteger(startLine) || (startLine as number) <= 0) {
-      throw new SafeToolError(`Comment ${number} requires a positive starting line.`)
+    const hasStartLine = startLine !== undefined
+    const hasEndLine = endLine !== undefined
+    if (hasStartLine !== hasEndLine) {
+      throw new SafeToolError(
+        `Comment ${number} must provide both starting and ending lines or neither.`,
+      )
     }
-    if (
-      !Number.isSafeInteger(endLine) ||
-      (endLine as number) < (startLine as number) ||
-      (endLine as number) - (startLine as number) > 100_000
-    ) {
-      throw new SafeToolError(`Comment ${number} has an invalid ending line.`)
+    if (hasStartLine) {
+      if (!Number.isSafeInteger(startLine) || (startLine as number) <= 0) {
+        throw new SafeToolError(`Comment ${number} has an invalid starting line.`)
+      }
+      if (
+        !Number.isSafeInteger(endLine) ||
+        (endLine as number) < (startLine as number) ||
+        (endLine as number) - (startLine as number) > 100_000
+      ) {
+        throw new SafeToolError(`Comment ${number} has an invalid ending line.`)
+      }
     }
     if (typeof raw.path !== "string" || typeof raw.text !== "string") {
       throw new SafeToolError(`Comment ${number} requires path and text strings.`)
     }
+    const commentText = validateCommentText(number as number, raw.text)
     return {
       number: number as number,
       path: normalizeRepositoryPath(raw.path),
-      startLine: startLine as number,
-      endLine: endLine as number,
-      text: validateCommentText(number as number, raw.text),
+      startLine: hasStartLine ? (startLine as number) : null,
+      endLine: hasEndLine ? (endLine as number) : null,
+      ...commentText,
     }
   })
   return comments.sort((left, right) => left.number - right.number)
+}
+
+function requireInlineLocation(comment: ValidatedComment): InlineValidatedComment {
+  if (comment.startLine === null || comment.endLine === null) {
+    throw new SafeToolError(
+      `Comment ${comment.number} targets a changed file and requires an explicit numeric source location for inline placement.`,
+    )
+  }
+  return comment as InlineValidatedComment
 }
 
 function validateRepositoryPart(value: string, label: string): string {
@@ -437,12 +494,50 @@ function isDnsResolutionFailure(error: unknown): boolean {
   return false
 }
 
+function bitbucketErrorDetail(text: string): string | null {
+  let payload: unknown
+  try {
+    payload = JSON.parse(text)
+  } catch {
+    return null
+  }
+
+  const messages: unknown[] = []
+  if (isRecord(payload)) {
+    messages.push(payload.message)
+    if (Array.isArray(payload.errors)) {
+      for (const error of payload.errors) {
+        if (isRecord(error)) {
+          messages.push(error.message)
+        }
+      }
+    }
+  }
+  for (const value of messages) {
+    if (typeof value !== "string") {
+      continue
+    }
+    const sanitized = value
+      .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+      .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[redacted]@")
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 500)
+    if (sanitized) {
+      return sanitized
+    }
+  }
+  return null
+}
+
 async function requestText(
   url: URL,
   config: RequestConfig,
   method: "GET" | "POST" = "GET",
   body?: unknown,
   accept = "application/json",
+  operation = "Bitbucket request",
 ): Promise<string> {
   const attempts = method === "GET" ? config.retries : 1
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -465,14 +560,19 @@ async function requestText(
       const response = await fetch(url, options)
       const text = await readResponseText(response, config.maxResponseBytes)
       if (!response.ok) {
+        const detail = bitbucketErrorDetail(text)
         throw new SafeToolError(
-          `Bitbucket ${method} request failed with HTTP ${response.status}.`,
+          `${operation} failed: Bitbucket ${method} returned HTTP ${response.status}` +
+            (detail ? `: ${detail}` : "."),
         )
       }
       return text
     } catch (error) {
       if (error instanceof SafeToolError) {
-        throw error
+        if (error.message.startsWith(`${operation} failed:`)) {
+          throw error
+        }
+        throw new SafeToolError(`${operation} failed: ${error.message}`)
       }
       if (attempt < attempts) {
         clearTimeout(timeout)
@@ -481,16 +581,16 @@ async function requestText(
       }
       if (config.proxyHost && isDnsResolutionFailure(error)) {
         throw new SafeToolError(
-          `Cannot resolve proxy host ${config.proxyHost}. Check VPN/network DNS or Bitbucket proxy settings.`,
+          `${operation} failed: cannot resolve proxy host ${config.proxyHost}. Check VPN/network DNS or Bitbucket proxy settings.`,
         )
       }
       if (controller.signal.aborted) {
         throw new SafeToolError(
-          `Bitbucket request timed out after ${attempts} attempt(s).`,
+          `${operation} failed: Bitbucket request timed out after ${attempts} attempt(s).`,
         )
       }
       throw new SafeToolError(
-        `Bitbucket ${method} request failed before a complete response was received.`,
+        `${operation} failed: Bitbucket ${method} request ended before a complete response was received.`,
       )
     } finally {
       clearTimeout(timeout)
@@ -504,12 +604,20 @@ async function requestJson(
   config: RequestConfig,
   method: "GET" | "POST" = "GET",
   body?: unknown,
+  operation = "Bitbucket request",
 ): Promise<unknown> {
-  const text = await requestText(url, config, method, body)
+  const text = await requestText(
+    url,
+    config,
+    method,
+    body,
+    "application/json",
+    operation,
+  )
   try {
     return JSON.parse(text)
   } catch {
-    throw new SafeToolError("Bitbucket returned invalid JSON.")
+    throw new SafeToolError(`${operation} failed: Bitbucket returned invalid JSON.`)
   }
 }
 
@@ -554,7 +662,10 @@ async function findPullRequest(
     url.searchParams.set("start", String(start))
     url.searchParams.set("limit", String(DEFAULT_PAGE_SIZE))
 
-    const payload = requireRecord(await requestJson(url, config), "pull request page")
+    const payload = requireRecord(
+      await requestJson(url, config, "GET", undefined, "Pull-request resolution"),
+      "pull request page",
+    )
     const values = payload.values
     if (!Array.isArray(values)) {
       throw new SafeToolError("Bitbucket returned an invalid pull request list.")
@@ -606,7 +717,9 @@ async function getPullRequest(
   config: RequestConfig,
 ): Promise<PullRequestIdentity> {
   const url = pullRequestApiUrl(baseUrl, pullRequest)
-  return normalizePullRequest(await requestJson(url, config))
+  return normalizePullRequest(
+    await requestJson(url, config, "GET", undefined, "Pull-request state verification"),
+  )
 }
 
 function pullRequestApiUrl(baseUrl: URL, pullRequest: PullRequestIdentity): URL {
@@ -618,6 +731,84 @@ function pullRequestApiUrl(baseUrl: URL, pullRequest: PullRequestIdentity): URL 
   )
 }
 
+function encodeRepositoryPath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/")
+}
+
+function normalizeBitbucketPath(value: unknown, label: string): string {
+  const path = requireRecord(value, label)
+  return normalizeRepositoryPath(requireString(path.toString, `${label} path`))
+}
+
+async function getPullRequestChanges(
+  baseUrl: URL,
+  pullRequest: PullRequestIdentity,
+  config: RequestConfig,
+): Promise<Map<string, PullRequestChange>> {
+  const changes = new Map<string, PullRequestChange>()
+  let start = 0
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const url = new URL(`${pullRequestApiUrl(baseUrl, pullRequest).toString()}/changes`)
+    url.searchParams.set("start", String(start))
+    url.searchParams.set("limit", String(CHANGE_PAGE_SIZE))
+    const payload = requireRecord(
+      await requestJson(url, config, "GET", undefined, "Pull-request change classification"),
+      "pull request changes",
+    )
+    if (!Array.isArray(payload.values)) {
+      throw new SafeToolError("Bitbucket returned an invalid pull request change list.")
+    }
+    for (const value of payload.values) {
+      const change = requireRecord(value, "pull request change")
+      const path = normalizeBitbucketPath(change.path, "pull request destination")
+      changes.set(path, {
+        path,
+        ...(change.srcPath === undefined
+          ? {}
+          : { srcPath: normalizeBitbucketPath(change.srcPath, "pull request source") }),
+        type: requireString(change.type, "pull request change type"),
+      })
+    }
+    if (payload.isLastPage === true) {
+      return changes
+    }
+    const next = payload.nextPageStart
+    if (!Number.isSafeInteger(next) || (next as number) <= start) {
+      throw new SafeToolError(
+        "The pull request change list is incomplete, so comment locations cannot be classified safely.",
+      )
+    }
+    start = next as number
+  }
+  throw new SafeToolError("Bitbucket pull request change pagination exceeded the safe page limit.")
+}
+
+async function ensureFileExistsAtHead(
+  baseUrl: URL,
+  pullRequest: PullRequestIdentity,
+  path: string,
+  config: RequestConfig,
+): Promise<void> {
+  const url = apiUrl(
+    baseUrl,
+    `/rest/api/latest/projects/${encodeURIComponent(pullRequest.targetProjectKey)}` +
+      `/repos/${encodeURIComponent(pullRequest.targetRepositorySlug)}` +
+      `/browse/${encodeRepositoryPath(path)}`,
+  )
+  url.searchParams.set("at", pullRequest.sourceHead)
+  url.searchParams.set("start", "0")
+  url.searchParams.set("limit", "1")
+  const payload = requireRecord(
+    await requestJson(url, config, "GET", undefined, "Unchanged-file verification"),
+    "repository file",
+  )
+  if (!Array.isArray(payload.lines)) {
+    throw new SafeToolError(
+      `Comment path ${path} is unchanged in the pull request but is not a file at the reviewed head revision.`,
+    )
+  }
+}
+
 function pullRequestWebUrl(baseUrl: URL, pullRequest: PullRequestIdentity): string {
   const url = new URL(baseUrl.origin)
   url.pathname =
@@ -627,19 +818,6 @@ function pullRequestWebUrl(baseUrl: URL, pullRequest: PullRequestIdentity): stri
   return url.toString()
 }
 
-function parseDiffPath(header: string): string | null {
-  const value = header.slice(4)
-  if (value === "/dev/null") {
-    return null
-  }
-  if (value.startsWith('"')) {
-    throw new SafeToolError(
-      "The Bitbucket diff contains a quoted path that cannot be anchored safely.",
-    )
-  }
-  return value.replace(/^[ab]\//, "")
-}
-
 type DiffLine = {
   path: string
   srcPath?: string
@@ -647,81 +825,102 @@ type DiffLine = {
   lineType: "ADDED" | "CONTEXT"
 }
 
-export function parseDestinationDiffLines(diff: string): Map<string, Map<number, DiffLine>> {
-  const result = new Map<string, Map<number, DiffLine>>()
-  let oldPath: string | null = null
-  let newPath: string | null = null
-  let newLine = 0
-  let inHunk = false
-
-  for (const line of diff.replace(/\r\n/g, "\n").split("\n")) {
-    if (!inHunk && line.startsWith("--- ")) {
-      oldPath = parseDiffPath(line)
-      newPath = null
-      inHunk = false
-      continue
-    }
-    if (!inHunk && line.startsWith("+++ ")) {
-      newPath = parseDiffPath(line)
-      inHunk = false
-      continue
-    }
-    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
-    if (hunk) {
-      if (!newPath) {
-        throw new SafeToolError("The Bitbucket diff hunk has no destination path.")
-      }
-      newLine = Number(hunk[1])
-      inHunk = true
-      continue
-    }
-    if (!inHunk || !newPath || line.startsWith("\\ No newline")) {
-      continue
-    }
-
-    if (line.startsWith("+")) {
-      const lines = result.get(newPath) ?? new Map<number, DiffLine>()
-      lines.set(newLine, {
-        path: newPath,
-        ...(oldPath && oldPath !== newPath ? { srcPath: oldPath } : {}),
-        line: newLine,
-        lineType: "ADDED",
-      })
-      result.set(newPath, lines)
-      newLine += 1
-      continue
-    }
-    if (line.startsWith("-")) {
-      continue
-    }
-    if (line.startsWith(" ")) {
-      const lines = result.get(newPath) ?? new Map<number, DiffLine>()
-      if (!lines.has(newLine)) {
-        lines.set(newLine, {
-          path: newPath,
-          ...(oldPath && oldPath !== newPath ? { srcPath: oldPath } : {}),
-          line: newLine,
-          lineType: "CONTEXT",
-        })
-      }
-      result.set(newPath, lines)
-      newLine += 1
-      continue
-    }
-    inHunk = false
-  }
-  return result
+type ParsedDestinationDiff = {
+  lines: Map<string, Map<number, DiffLine>>
+  truncated: boolean
 }
 
-function resolveAnchor(
-  comment: ValidatedComment,
+function isTruncated(value: unknown): boolean {
+  return value === true || value === "true"
+}
+
+export function parseStructuredDestinationDiffLines(
+  value: unknown,
+  expectedPath: string,
+): ParsedDestinationDiff {
+  const payload = requireRecord(value, "pull request file diff")
+  if (!Array.isArray(payload.diffs)) {
+    throw new SafeToolError("Bitbucket returned an invalid structured file diff.")
+  }
+
+  const result = new Map<string, Map<number, DiffLine>>()
+  let matched = false
+  let truncated = isTruncated(payload.truncated)
+  for (const rawDiff of payload.diffs) {
+    const diff = requireRecord(rawDiff, "pull request file diff entry")
+    truncated ||= isTruncated(diff.truncated)
+    if (diff.binary === true) {
+      throw new SafeToolError(
+        `Comment path ${expectedPath} is binary and cannot receive an inline text comment.`,
+      )
+    }
+    const path = normalizeBitbucketPath(diff.destination, "file diff destination")
+    if (path !== expectedPath) {
+      continue
+    }
+    matched = true
+    const srcPath =
+      diff.source === undefined || diff.source === null
+        ? undefined
+        : normalizeBitbucketPath(diff.source, "file diff source")
+    if (!Array.isArray(diff.hunks)) {
+      throw new SafeToolError("Bitbucket returned an invalid file diff hunk list.")
+    }
+    const destinationLines = result.get(path) ?? new Map<number, DiffLine>()
+    for (const rawHunk of diff.hunks) {
+      const hunk = requireRecord(rawHunk, "file diff hunk")
+      truncated ||= isTruncated(hunk.truncated)
+      if (!Array.isArray(hunk.segments)) {
+        throw new SafeToolError("Bitbucket returned an invalid file diff segment list.")
+      }
+      for (const rawSegment of hunk.segments) {
+        const segment = requireRecord(rawSegment, "file diff segment")
+        truncated ||= isTruncated(segment.truncated)
+        const type = requireString(segment.type, "file diff segment type").toUpperCase()
+        if (type !== "ADDED" && type !== "CONTEXT") {
+          continue
+        }
+        if (!Array.isArray(segment.lines)) {
+          throw new SafeToolError("Bitbucket returned an invalid file diff line list.")
+        }
+        for (const rawLine of segment.lines) {
+          const line = requireRecord(rawLine, "file diff line")
+          truncated ||= isTruncated(line.truncated)
+          if (!Number.isSafeInteger(line.destination) || (line.destination as number) <= 0) {
+            throw new SafeToolError(
+              "Bitbucket returned an invalid destination line in the structured file diff.",
+            )
+          }
+          const lineNumber = line.destination as number
+          const existing = destinationLines.get(lineNumber)
+          if (!existing || type === "ADDED") {
+            destinationLines.set(lineNumber, {
+              path,
+              ...(srcPath && srcPath !== path ? { srcPath } : {}),
+              line: lineNumber,
+              lineType: type,
+            })
+          }
+        }
+      }
+    }
+    result.set(path, destinationLines)
+  }
+  if (!matched) {
+    throw new SafeToolError(
+      `Bitbucket's structured diff did not contain the requested destination path ${expectedPath}.`,
+    )
+  }
+  return { lines: result, truncated }
+}
+
+function selectAnchor(
+  comment: InlineValidatedComment,
   diffLines: Map<string, Map<number, DiffLine>>,
-): InlineAnchor {
+): InlineAnchor | null {
   const fileLines = diffLines.get(comment.path)
   if (!fileLines) {
-    throw new SafeToolError(
-      `Comment ${comment.number} path ${comment.path} is not available in the current pull request diff.`,
-    )
+    return null
   }
 
   let selected = fileLines.get(comment.startLine)
@@ -744,9 +943,7 @@ function resolveAnchor(
     }
   }
   if (!selected) {
-    throw new SafeToolError(
-      `Comment ${comment.number} lines ${comment.startLine}-${comment.endLine} cannot be anchored in the current pull request diff.`,
-    )
+    return null
   }
   return {
     diffType: "EFFECTIVE",
@@ -758,22 +955,128 @@ function resolveAnchor(
   }
 }
 
+function expandedContextLines(
+  comment: InlineValidatedComment,
+  diffLines: Map<string, Map<number, DiffLine>>,
+): number {
+  const fileLines = diffLines.get(comment.path)
+  if (!fileLines || fileLines.size === 0) {
+    throw new SafeToolError(
+      `Comment ${comment.number} path ${comment.path} has no destination lines in its pull request diff.`,
+    )
+  }
+  let closestDistance = Number.POSITIVE_INFINITY
+  for (const line of fileLines.keys()) {
+    const distance =
+      line < comment.startLine
+        ? comment.startLine - line
+        : line > comment.endLine
+          ? line - comment.endLine
+          : 0
+    closestDistance = Math.min(closestDistance, distance)
+  }
+  const requested = closestDistance + INITIAL_DIFF_CONTEXT_LINES + 1
+  if (!Number.isSafeInteger(requested) || requested > MAX_DIFF_CONTEXT_LINES) {
+    throw new SafeToolError(
+      `Comment ${comment.number} requires more diff context than Bitbucket can request safely.`,
+    )
+  }
+  return Math.max(INITIAL_DIFF_CONTEXT_LINES, requested)
+}
+
+async function fetchFileDiffLines(
+  baseUrl: URL,
+  pullRequest: PullRequestIdentity,
+  change: PullRequestChange,
+  contextLines: number,
+  config: RequestConfig,
+): Promise<ParsedDestinationDiff> {
+  const url = new URL(
+    `${pullRequestApiUrl(baseUrl, pullRequest).toString()}` +
+      `/diff/${encodeRepositoryPath(change.path)}`,
+  )
+  url.searchParams.set("diffType", "EFFECTIVE")
+  url.searchParams.set("contextLines", String(contextLines))
+  url.searchParams.set("withComments", "false")
+  if (change.srcPath) {
+    url.searchParams.set("srcPath", change.srcPath)
+  }
+  const diff = await requestJson(
+    url,
+    config,
+    "GET",
+    undefined,
+    "Inline-anchor structured diff lookup",
+  )
+  return parseStructuredDestinationDiffLines(diff, change.path)
+}
+
+async function resolveInlineAnchor(
+  baseUrl: URL,
+  pullRequest: PullRequestIdentity,
+  comment: InlineValidatedComment,
+  change: PullRequestChange,
+  config: RequestConfig,
+): Promise<InlineAnchor> {
+  if (change.type.toUpperCase() === "DELETE") {
+    throw new SafeToolError(
+      `Comment ${comment.number} targets a deleted file and cannot be anchored on the destination side.`,
+    )
+  }
+  const initialDiff = await fetchFileDiffLines(
+    baseUrl,
+    pullRequest,
+    change,
+    INITIAL_DIFF_CONTEXT_LINES,
+    config,
+  )
+  const initialAnchor = selectAnchor(comment, initialDiff.lines)
+  if (initialAnchor) {
+    return initialAnchor
+  }
+  const expandedDiff = await fetchFileDiffLines(
+    baseUrl,
+    pullRequest,
+    change,
+    expandedContextLines(comment, initialDiff.lines),
+    config,
+  )
+  const expandedAnchor = selectAnchor(comment, expandedDiff.lines)
+  if (!expandedAnchor) {
+    if (expandedDiff.truncated) {
+      throw new SafeToolError(
+        `Comment ${comment.number} lines ${comment.startLine}-${comment.endLine} are outside Bitbucket's truncated structured file diff.`,
+      )
+    }
+    throw new SafeToolError(
+      `Comment ${comment.number} lines ${comment.startLine}-${comment.endLine} cannot be anchored after expanding the changed file diff.`,
+    )
+  }
+  return expandedAnchor
+}
+
 function sameAnchor(value: unknown, expected: InlineAnchor): boolean {
   if (!isRecord(value)) {
     return false
   }
+  const path =
+    typeof value.path === "string"
+      ? value.path
+      : isRecord(value.path) && typeof value.path.toString === "string"
+        ? value.path.toString
+        : null
   return (
-    value.path === expected.path &&
+    path === expected.path &&
     value.line === expected.line &&
     value.lineType === expected.lineType &&
     value.fileType === expected.fileType
   )
 }
 
-async function findDuplicateComment(
+async function findDuplicateInlineComment(
   baseUrl: URL,
   pullRequest: PullRequestIdentity,
-  prepared: { input: ValidatedComment; anchor: InlineAnchor },
+  prepared: { text: string; anchor: InlineAnchor },
   config: RequestConfig,
 ): Promise<number | null> {
   let start = 0
@@ -786,7 +1089,16 @@ async function findDuplicateComment(
     url.searchParams.append("state", "RESOLVED")
     url.searchParams.set("start", String(start))
     url.searchParams.set("limit", String(DEFAULT_PAGE_SIZE))
-    const payload = requireRecord(await requestJson(url, config), "comment page")
+    const payload = requireRecord(
+      await requestJson(
+        url,
+        config,
+        "GET",
+        undefined,
+        "Inline-comment duplicate preflight",
+      ),
+      "comment page",
+    )
     const values = payload.values
     if (!Array.isArray(values)) {
       throw new SafeToolError("Bitbucket returned an invalid comment list.")
@@ -795,7 +1107,7 @@ async function findDuplicateComment(
       if (!isRecord(value)) {
         continue
       }
-      if (value.text === prepared.input.text && sameAnchor(value.anchor, prepared.anchor)) {
+      if (value.text === prepared.text && sameAnchor(value.anchor, prepared.anchor)) {
         return requireInteger(value.id, "comment id")
       }
     }
@@ -811,6 +1123,87 @@ async function findDuplicateComment(
   throw new SafeToolError("Bitbucket comment pagination exceeded the safe page limit.")
 }
 
+async function findDuplicateGeneralComment(
+  baseUrl: URL,
+  pullRequest: PullRequestIdentity,
+  text: string,
+  config: RequestConfig,
+): Promise<number | null> {
+  const latestByCommentId = new Map<
+    number,
+    {
+      activityId: number
+      createdDate: number
+      commentAction: string | null
+      comment: JsonRecord
+      anchor: unknown
+    }
+  >()
+  let start = 0
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const url = new URL(`${pullRequestApiUrl(baseUrl, pullRequest).toString()}/activities`)
+    url.searchParams.set("start", String(start))
+    url.searchParams.set("limit", String(DEFAULT_PAGE_SIZE))
+    const payload = requireRecord(
+      await requestJson(
+        url,
+        config,
+        "GET",
+        undefined,
+        "General-comment duplicate preflight",
+      ),
+      "pull request activity page",
+    )
+    if (!Array.isArray(payload.values)) {
+      throw new SafeToolError("Bitbucket returned an invalid pull request activity list.")
+    }
+    for (const value of payload.values) {
+      if (!isRecord(value) || value.action !== "COMMENTED" || !isRecord(value.comment)) {
+        continue
+      }
+      const commentId = requireInteger(value.comment.id, "comment id")
+      const activityId = Number.isSafeInteger(value.id) ? (value.id as number) : -1
+      const createdDate = Number.isSafeInteger(value.createdDate)
+        ? (value.createdDate as number)
+        : -1
+      const previous = latestByCommentId.get(commentId)
+      if (
+        !previous ||
+        createdDate > previous.createdDate ||
+        (createdDate === previous.createdDate && activityId > previous.activityId)
+      ) {
+        latestByCommentId.set(commentId, {
+          activityId,
+          createdDate,
+          commentAction:
+            typeof value.commentAction === "string" ? value.commentAction : null,
+          comment: value.comment,
+          anchor: value.commentAnchor,
+        })
+      }
+    }
+    if (payload.isLastPage === true) {
+      for (const [commentId, activity] of latestByCommentId) {
+        if (
+          activity.commentAction?.toUpperCase() !== "DELETED" &&
+          activity.comment.text === text &&
+          (activity.anchor === undefined || activity.anchor === null) &&
+          (activity.comment.parent === undefined || activity.comment.parent === null)
+        ) {
+          return commentId
+        }
+      }
+      return null
+    }
+    const next = payload.nextPageStart
+    if (!Number.isSafeInteger(next) || (next as number) <= start) {
+      throw new SafeToolError("Bitbucket activity pagination made no progress.")
+    }
+    start = next as number
+  }
+  throw new SafeToolError("Bitbucket activity pagination exceeded the safe page limit.")
+}
+
 async function postComment(
   baseUrl: URL,
   pullRequest: PullRequestIdentity,
@@ -819,10 +1212,16 @@ async function postComment(
 ): Promise<number> {
   const url = new URL(`${pullRequestApiUrl(baseUrl, pullRequest).toString()}/comments`)
   const response = requireRecord(
-    await requestJson(url, config, "POST", {
-      text: prepared.input.text,
-      anchor: prepared.anchor,
-    }),
+    await requestJson(
+      url,
+      config,
+      "POST",
+      {
+        text: prepared.text,
+        ...(prepared.placement === "inline" ? { anchor: prepared.anchor } : {}),
+      },
+      "Comment publication",
+    ),
     "created comment",
   )
   return requireInteger(response.id, "created comment id")
@@ -836,11 +1235,12 @@ function commentWebUrl(prUrl: string, commentId: number): string {
 
 function blockedResult(reason: string, numbers: number[]): PublicationResult {
   return {
-    schemaVersion: "1",
+    schemaVersion: "2",
     status: "blocked",
     pullRequest: null,
     comments: numbers.map((number) => ({
       number,
+      placement: null,
       status: "not-attempted",
       commentId: null,
       url: null,
@@ -918,25 +1318,50 @@ export async function sendBitbucketComments(args: {
       )
     }
 
-    const diffUrl = new URL(`${pullRequestApiUrl(baseUrl, current).toString()}.diff`)
-    const diff = await requestText(diffUrl, config, "GET", undefined, "text/plain")
-    const diffLines = parseDestinationDiffLines(diff)
+    const changes = await getPullRequestChanges(baseUrl, current, config)
     const prepared: PreparedComment[] = []
     for (const input of comments) {
-      const anchor = resolveAnchor(input, diffLines)
-      const alreadyPostedId = await findDuplicateComment(
+      const change = changes.get(input.path)
+      if (change) {
+        const inlineInput = requireInlineLocation(input)
+        const anchor = await resolveInlineAnchor(
+          baseUrl,
+          current,
+          inlineInput,
+          change,
+          config,
+        )
+        const text = input.inlineText
+        const alreadyPostedId = await findDuplicateInlineComment(
+          baseUrl,
+          current,
+          { text, anchor },
+          config,
+        )
+        prepared.push({
+          input: inlineInput,
+          placement: "inline",
+          text,
+          anchor,
+          alreadyPostedId,
+        })
+        continue
+      }
+      await ensureFileExistsAtHead(baseUrl, current, input.path, config)
+      const text = input.fullText
+      const alreadyPostedId = await findDuplicateGeneralComment(
         baseUrl,
         current,
-        { input, anchor },
+        text,
         config,
       )
-      prepared.push({ input, anchor, alreadyPostedId })
+      prepared.push({ input, placement: "general", text, alreadyPostedId })
     }
 
     const prUrl = pullRequestWebUrl(baseUrl, current)
     const publicationItems: PublicationItem[] = []
     result = {
-      schemaVersion: "1",
+      schemaVersion: "2",
       status: "completed",
       pullRequest: {
         projectKey: current.targetProjectKey,
@@ -956,6 +1381,7 @@ export async function sendBitbucketComments(args: {
       if (item.alreadyPostedId !== null) {
         publicationItems.push({
           number: item.input.number,
+          placement: item.placement,
           status: "already-posted",
           commentId: item.alreadyPostedId,
           url: commentWebUrl(prUrl, item.alreadyPostedId),
@@ -972,6 +1398,7 @@ export async function sendBitbucketComments(args: {
       ) {
         publicationItems.push({
           number: item.input.number,
+          placement: item.placement,
           status: "failed",
           commentId: null,
           url: null,
@@ -980,6 +1407,7 @@ export async function sendBitbucketComments(args: {
         for (const remaining of prepared.slice(index + 1)) {
           publicationItems.push({
             number: remaining.input.number,
+            placement: remaining.placement,
             status: "not-attempted",
             commentId: null,
             url: null,
@@ -996,6 +1424,7 @@ export async function sendBitbucketComments(args: {
         const commentId = await postComment(baseUrl, latest, item, config)
         publicationItems.push({
           number: item.input.number,
+          placement: item.placement,
           status: "posted",
           commentId,
           url: commentWebUrl(prUrl, commentId),
@@ -1004,6 +1433,7 @@ export async function sendBitbucketComments(args: {
       } catch (error) {
         publicationItems.push({
           number: item.input.number,
+          placement: item.placement,
           status: "failed",
           commentId: null,
           url: null,
@@ -1015,6 +1445,7 @@ export async function sendBitbucketComments(args: {
         for (const remaining of prepared.slice(index + 1)) {
           publicationItems.push({
             number: remaining.input.number,
+            placement: remaining.placement,
             status: "not-attempted",
             commentId: null,
             url: null,
@@ -1045,7 +1476,7 @@ export async function sendBitbucketComments(args: {
 // directly and does not need the @opencode-ai/plugin helper at runtime.
 export default {
   description:
-    "Post an explicitly selected batch of numbered findings from the latest deep-review report as Bitbucket Data Center inline comments after validating the repository, pull request head and diff anchors.",
+    "Post explicitly selected findings as Bitbucket Data Center inline comments for changed files or general pull request comments for unchanged files after complete preflight validation.",
   args: {
     repositoryUrl: {
       type: "string",
@@ -1069,17 +1500,27 @@ export default {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["number", "path", "startLine", "endLine", "text"],
+        required: ["number", "path", "text"],
         properties: {
           number: { type: "integer", minimum: 1 },
           path: { type: "string", minLength: 1 },
-          startLine: { type: "integer", minimum: 1 },
-          endLine: { type: "integer", minimum: 1 },
+          startLine: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "Numeric location start when present in the report; required after classification for changed-file inline placement",
+          },
+          endLine: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "Numeric location end when present in the report; required after classification for changed-file inline placement",
+          },
           text: {
             type: "string",
             minLength: 1,
             description:
-              "Exact final-report finding block with only its Location line removed",
+              "Exact final-report finding block including its Location line",
           },
         },
       },

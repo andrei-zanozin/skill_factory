@@ -4,7 +4,7 @@
 
 This document explains how the OpenCode deep-review MVP should work and how its responsibilities should be divided during implementation. The design aims to preserve deep, layer-specific review focus without adding unnecessary skills or allowing one layer to hide problems in another.
 
-The `/deep-review` workflow is read-only. After validating its numbered final report, the developer may use the separate `/send-comments` command to post an explicitly selected subset as Bitbucket Data Center inline comments. No review task receives posting permission.
+The `/deep-review` workflow is read-only. After validating its numbered final report, the developer may use the separate `/send-comments` command to post an explicitly selected subset as Bitbucket Data Center inline comments for changed files or general pull-request comments for unchanged files. No review task receives posting permission.
 
 ## Design principles
 
@@ -65,8 +65,9 @@ The command is a separate, explicitly mutating entry point. It should:
 
 - Accept a comma-separated list of unique positive final-report numbers, with optional whitespace around commas, for example `/send-comments 1, 3`.
 - Operate only on the latest completed deep-review report in the same OpenCode session.
-- Copy each selected finding block exactly and remove only its `Location:` line.
-- Parse the removed location and pass the complete selected batch to `bitbucket-send-comments` once.
+- Copy each selected finding block exactly, including its `Location:` line.
+- Parse each repository path, pass numeric lines only when explicitly present in the report and never derive missing lines from repository searches.
+- Pass the complete selected batch to `bitbucket-send-comments` once; the tool permits missing lines only for unchanged-file general comments.
 - Stop without posting when the report, selection, reviewed revision, source branch or Git remote is missing or ambiguous.
 
 The command must not re-run review work, rewrite selected findings or use a general-purpose HTTP or shell operation to post comments.
@@ -80,9 +81,13 @@ The narrow TypeScript posting tool should:
 - Validate the configured Bitbucket Data Center server, access token, proxy and CA bundle without returning or logging secrets.
 - Resolve exactly one open outgoing pull request for the repository, reviewed source branch and reviewed head revision.
 - Re-fetch the pull request and require its current head to equal the reviewed head.
-- Read the effective pull-request diff and resolve every selected report location to a destination-side inline anchor.
+- Read the complete pull-request change list and classify every selected file as changed or unchanged.
+- For a changed file, require explicit numeric report lines, read its structured effective diff, use Bitbucket's destination line numbers and segment types, expand context when necessary and require a destination-side inline anchor.
+- For an unchanged file, verify that it exists at the reviewed head and prepare a general pull-request comment.
 - Validate the complete batch before the first write.
-- Detect an already-posted comment by exact text and anchor.
+- Remove `Location:` only from inline comments and retain it in general pull-request comments.
+- Detect an already-posted inline comment by exact text and anchor through the path-scoped comments API, or an exact general comment through pull-request activity.
+- Return the preflight stage and a sanitized Bitbucket error message when an API request fails.
 - Post comments in final-report order and never retry a POST automatically.
 - Return explicit `posted`, `already-posted`, `failed` or `not-attempted` status for every selected finding.
 
@@ -418,8 +423,8 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 13. The Plan agent writes the final report once using the exact Markdown format reference.
 14. OpenCode shows the complete report to the developer.
 15. After validating the report, the developer may run `/send-comments` with selected finding numbers.
-16. The command copies the selected finding blocks exactly, removing only their location lines, and calls `bitbucket-send-comments` once.
-17. The tool resolves the matching PR, validates the reviewed head and all inline anchors, checks duplicates and posts the validated batch.
+16. The command copies the selected finding blocks exactly, including their location lines, and calls `bitbucket-send-comments` once.
+17. The tool resolves the matching PR, validates the reviewed head, classifies selected files, expands changed-file diff context when needed, checks duplicates and posts the validated batch.
 
 ## Failure and limitation handling
 
@@ -436,9 +441,13 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 | A required report field lacks verified information | Do not invent content; preserve the gap as a material limitation where applicable. |
 | Review target changes during execution | Restart with a new frozen target or report that results are not valid for one consistent revision. |
 | `/send-comments` has no latest complete report in the session | Stop without calling Bitbucket. |
-| A selected number or numeric source location is missing or ambiguous | Stop before posting any comment. |
+| A selected number or repository path is missing or ambiguous | Stop before posting any comment. |
+| A selected changed file has no explicit numeric source location | Stop before posting any comment. |
+| An unchanged-file location has no numeric lines | Post a general pull-request comment without deriving lines. |
 | No single open PR matches the repository, source branch and reviewed head | Stop before posting any comment. |
-| A selected location cannot be anchored in the current effective PR diff | Stop before posting any comment; never downgrade it to a general comment. |
+| A selected changed-file location cannot be anchored after expanding the structured effective file diff | Stop before posting any comment. |
+| A selected file is unchanged in the PR | Post a general pull-request comment and retain its `Location:` line. |
+| A selected file cannot be classified or does not exist at the reviewed head | Stop before posting any comment. |
 | A POST fails after earlier comments succeeded | Stop further publication and return per-comment partial status; never claim atomic rollback. |
 
 ## MVP boundaries
@@ -451,7 +460,7 @@ The MVP includes:
 - Finding verification and deduplication.
 - Stable severity-prioritized text output.
 - Read-only review execution.
-- Explicit publication of selected numbered findings as Bitbucket Data Center inline comments.
+- Explicit publication of selected numbered findings as inline comments for changed files or general pull-request comments for unchanged files.
 
 The MVP does not include:
 

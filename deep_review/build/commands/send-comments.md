@@ -3,7 +3,7 @@ description: Send selected findings from the latest deep-review report to Bitbuc
 agent: send-comments
 ---
 
-Send findings `$ARGUMENTS` from the most recent completed deep-review report in this OpenCode session as Bitbucket pull-request inline comments.
+Send findings `$ARGUMENTS` from the most recent completed deep-review report in this OpenCode session as Bitbucket pull-request comments.
 
 Treat `$ARGUMENTS` as one comma-separated list of unique positive integers. Allow optional whitespace around commas, as in `1, 3`. Reject missing values, duplicate numbers, non-integers, numbers less than one, empty items and trailing commas. On invalid input, stop and show this usage:
 
@@ -14,11 +14,11 @@ This command is valid only immediately after a complete deep-review report in th
 Use the latest report as the only source of comment content and reviewed revisions. For every selected finding:
 
 1. Copy its complete finding block exactly as rendered in the report.
-2. Remove only the `- Location:` line. Preserve the heading, problem and impact, suggested fix, evidence, Markdown and spacing exactly. Do not summarize, rewrite or add severity, attribution or metadata.
-3. Parse the removed location into its repository-relative file path and numeric starting and ending lines. Stop if the location has no numeric line or cannot be parsed unambiguously.
+2. Preserve the `- Location:` line, heading, problem and impact, suggested fix, evidence, Markdown and spacing exactly. Do not summarize, rewrite or add severity, attribution or metadata.
+3. Parse the repository-relative file path. Pass numeric starting and ending lines only when they are explicitly present in the report. Never infer or derive missing lines from repository searches. Stop when the path or any reported numeric range cannot be parsed unambiguously. The tool classifies the file: missing lines are valid for an unchanged-file general comment, while a changed file without explicit numeric lines blocks the complete batch.
 
 Read the report's review target, base revision and head revision. Resolve the Git remote that owns the reviewed branch using only validated read-only Git operations. Stop when the source branch or owning remote is ambiguous. Do not check out, switch, fetch, reset or modify a branch.
 
 Call `bitbucket-send-comments` exactly once with the complete selected batch, the owning remote URL, normalized source branch and full reviewed head revision. Do not use shell commands, generic HTTP tools or another integration to post comments.
 
-The Bitbucket tool must preflight the complete batch before posting. Relay a blocked result without retrying through another mechanism. For a completed or partial result, report the status and Bitbucket link for every requested number. Never claim that a comment was posted when the tool did not return a created comment identifier or an `already-posted` result.
+The Bitbucket tool must preflight the complete batch before posting. It posts an inline comment without the `Location:` line when the file is changed and the target line can be anchored, fetching expanded file diff context when necessary. It posts a general pull-request comment with the `Location:` line retained when the file is unchanged. Any other classification or anchoring outcome blocks the complete batch before posting. Relay a blocked result without retrying through another mechanism. For a completed or partial result, report the placement, status and Bitbucket link for every requested number. Never claim that a comment was posted when the tool did not return a created comment identifier or an `already-posted` result.

@@ -15,7 +15,7 @@ package "OpenCode" {
   component "Plan agent\n(built-in primary)\norchestration, result verification,\ndeduplication and final report formatting" as Plan <<built-in>>
 
   component "<b>jira-requirement</b> tool\n(custom TypeScript tool)\nJira Data Center REST, validation,\npagination and normalized JSON" as JiraTool <<custom>>
-  component "<b>bitbucket-send-comments</b> tool\n(custom TypeScript tool)\nPR/head preflight, diff anchors,\nduplicate check and inline posting" as BitbucketTool <<custom>>
+  component "<b>bitbucket-send-comments</b> tool\n(custom TypeScript tool)\nPR/head preflight, file classification,\nduplicate check and comment posting" as BitbucketTool <<custom>>
 
   artifact "Requirement context\nuntrusted Jira data, provenance,\ncompleteness status and warnings" as RequirementContext
 
@@ -83,8 +83,8 @@ Report -left-> Developer
 Developer -down-> SendComments : /send-comments 1, 3\nafter report validation
 Report ..> SendComments : latest numbered report\nin the same session
 SendComments -down-> SendAgent : explicit selected numbers
-SendAgent -down-> BitbucketTool : exact selected blocks\nwithout Location lines
-BitbucketTool -down-> Bitbucket : resolve PR, validate current head,\nread effective diff and post inline
+SendAgent -down-> BitbucketTool : exact selected blocks\nincluding Location lines
+BitbucketTool -down-> Bitbucket : changed file: inline with expanded context\nunchanged file: general PR comment
 BitbucketTool -up-> Developer : per-comment status + links
 
 note right of Plan
@@ -132,8 +132,11 @@ end note
 
 note right of BitbucketTool
   Validate the complete selected batch before writing.
-  Keep the exact report finding format and remove only Location.
-  Fail on stale head, ambiguous PR or missing inline anchor.
+  Remove Location only from inline comments.
+  Require report lines only for changed-file inline placement.
+  Parse structured diff destination lines and segment types.
+  Use PR activity for general-comment duplicate checks.
+  Fail on stale head, ambiguous PR or unresolved placement.
   Use HTTPS_PROXY with TOOL_PROXY_USERNAME
   and TOOL_PROXY_PASSWORD; never expose credentials.
   Phase 2 PR-context augmentation is not included.
