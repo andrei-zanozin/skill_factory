@@ -19,6 +19,7 @@ Perform only Layer 1. Evaluate whether the change implements the intended soluti
 3. Validate architecture and code structure.
    - Check whether responsibilities, boundaries, dependencies, data ownership, persistence, and lifecycle choices fit the repository's established design.
    - Look for changes that bypass abstractions, duplicate authoritative logic, create invalid state, or make future changes unsafe.
+   - Apply KISS and YAGNI: flag unnecessary complexity, speculative abstractions, and speculative extension points.
    - Prefer repository evidence over abstract design preference.
 
 4. Validate interfaces and cross-domain communication.

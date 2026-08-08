@@ -7,6 +7,7 @@ Perform only Layer 2. Review changed and affected units for implementation bugs,
 1. Review units' implementations and find implementation bugs and edge cases.
    - Trace normal, boundary, invalid, empty, null, and failure paths relevant to the change.
    - Inspect control flow, state mutation, data transformations, persistence behavior, resource handling, error propagation, and cleanup.
+   - Apply DRY and KISS: flag non-trivial duplicated logic and avoidable implementation complexity.
    - Check assumptions about ordering, identity, equality, numeric limits, time, retries, concurrency, transactions, caching, and partial failure when relevant.
    - Follow callers and callees beyond the diff when needed to prove impact.
    - Identify regressions introduced or exposed by the reviewed change; do not report unrelated pre-existing defects.
