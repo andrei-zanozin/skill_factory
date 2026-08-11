@@ -1,6 +1,7 @@
 ---
 description: Publish explicitly selected findings from the latest deep-review report
 mode: primary
+hidden: true
 permission:
   edit: deny
   task: deny
