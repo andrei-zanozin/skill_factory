@@ -8,6 +8,7 @@ const DEFAULT_MAX_RESPONSE_BYTES = 20_000_000
 const MAX_DIFF_CONTEXT_LINES = 2_147_483_647
 const MAX_PAGES = 10_000
 const MAX_COMMENTS_PER_REQUEST = 50
+const MAX_LOCATIONS_PER_COMMENT = 20
 const MAX_COMMENT_BYTES = 100_000
 const FULL_REVISION = /^[0-9a-f]{40,64}$/i
 const SAFE_REPOSITORY_PART = /^[A-Za-z0-9._~-]+$/
@@ -15,26 +16,39 @@ const SAFE_REPOSITORY_PART = /^[A-Za-z0-9._~-]+$/
 type JsonRecord = Record<string, unknown>
 type FindingSeverity = "Critical" | "Major" | "Minor"
 
-type CommentInput = {
-  number: number
-  severity: FindingSeverity
+type CommentLocationInput = {
   path: string
   startLine?: number
   endLine?: number
+}
+
+type CommentInput = {
+  number: number
+  severity: FindingSeverity
+  locations: CommentLocationInput[]
+  pullRequestWide: boolean
   text: string
 }
 
-type ValidatedComment = Omit<CommentInput, "text"> & {
+type ValidatedLocation = {
   path: string
   startLine: number | null
   endLine: number | null
+}
+
+type ValidatedComment = Omit<CommentInput, "text" | "locations"> & {
+  locations: ValidatedLocation[]
   fullText: string
   inlineText: string
 }
 
-type InlineValidatedComment = ValidatedComment & {
+type InlineLocation = ValidatedLocation & {
   startLine: number
   endLine: number
+}
+
+type InlineCandidateLocation = InlineLocation & {
+  number: number
 }
 
 type RepositoryIdentity = {
@@ -71,6 +85,7 @@ type InlineAnchor = {
 type PreparedInlineComment = {
   input: ValidatedComment
   placement: "inline"
+  placementReason: "resolved-diff-anchor"
   text: string
   anchor: InlineAnchor
   alreadyPostedId: number | null
@@ -79,6 +94,7 @@ type PreparedInlineComment = {
 type PreparedGeneralComment = {
   input: ValidatedComment
   placement: "general"
+  placementReason: string
   text: string
   alreadyPostedId: number | null
 }
@@ -98,14 +114,15 @@ type RequestConfig = {
 type PublicationItem = {
   number: number
   placement: "inline" | "general" | null
-  status: "posted" | "already-posted" | "failed" | "not-attempted"
+  placementReason: string | null
+  status: "posted" | "already-posted" | "skipped" | "failed" | "not-attempted"
   commentId: number | null
   url: string | null
   reason: string | null
 }
 
 type PublicationResult = {
-  schemaVersion: "2"
+  schemaVersion: "3"
   status: "completed" | "partial" | "blocked"
   pullRequest: {
     projectKey: string
@@ -121,6 +138,15 @@ type PublicationResult = {
 }
 
 class SafeToolError extends Error {}
+class GeneralPlacementError extends Error {
+  placementReason: string
+
+  constructor(placementReason: string, message: string) {
+    super(message)
+    this.placementReason = placementReason
+  }
+}
+class InvalidLocationError extends Error {}
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -326,7 +352,58 @@ function validateFindingSeverity(value: unknown, number: number): FindingSeverit
   return value
 }
 
-function validateComments(value: unknown): ValidatedComment[] {
+function validateLocation(value: unknown, number: number, index: number): ValidatedLocation {
+  if (!isRecord(value)) {
+    throw new SafeToolError(`Comment ${number} location ${index + 1} must be an object.`)
+  }
+  const startLine = value.startLine
+  const endLine = value.endLine
+  const hasStartLine = startLine !== undefined
+  const hasEndLine = endLine !== undefined
+  if (hasStartLine !== hasEndLine) {
+    throw new SafeToolError(
+      `Comment ${number} location ${index + 1} must provide both starting and ending lines or neither.`,
+    )
+  }
+  if (hasStartLine) {
+    if (!Number.isSafeInteger(startLine) || (startLine as number) <= 0) {
+      throw new SafeToolError(`Comment ${number} location ${index + 1} has an invalid starting line.`)
+    }
+    if (
+      !Number.isSafeInteger(endLine) ||
+      (endLine as number) < (startLine as number) ||
+      (endLine as number) - (startLine as number) > 100_000
+    ) {
+      throw new SafeToolError(`Comment ${number} location ${index + 1} has an invalid ending line.`)
+    }
+  }
+  if (typeof value.path !== "string") {
+    throw new SafeToolError(`Comment ${number} location ${index + 1} requires a path string.`)
+  }
+  return {
+    path: normalizeRepositoryPath(value.path),
+    startLine: hasStartLine ? (startLine as number) : null,
+    endLine: hasEndLine ? (endLine as number) : null,
+  }
+}
+
+function skippedItem(number: number, reason: string): PublicationItem {
+  return {
+    number,
+    placement: null,
+    placementReason: null,
+    status: "skipped",
+    commentId: null,
+    url: null,
+    reason,
+  }
+}
+
+function validateComments(value: unknown): {
+  comments: ValidatedComment[]
+  skipped: PublicationItem[]
+  selectedNumbers: number[]
+} {
   if (!Array.isArray(value) || value.length === 0) {
     throw new SafeToolError("At least one selected comment is required.")
   }
@@ -337,13 +414,14 @@ function validateComments(value: unknown): ValidatedComment[] {
   }
 
   const numbers = new Set<number>()
-  const comments = value.map((raw, index) => {
+  const comments: ValidatedComment[] = []
+  const skipped: PublicationItem[] = []
+  for (let index = 0; index < value.length; index += 1) {
+    const raw = value[index]
     if (!isRecord(raw)) {
       throw new SafeToolError(`comments[${index}] must be an object.`)
     }
     const number = raw.number
-    const startLine = raw.startLine
-    const endLine = raw.endLine
     if (!Number.isSafeInteger(number) || (number as number) <= 0) {
       throw new SafeToolError(`comments[${index}].number must be a positive integer.`)
     }
@@ -351,49 +429,53 @@ function validateComments(value: unknown): ValidatedComment[] {
       throw new SafeToolError(`Comment number ${number} was selected more than once.`)
     }
     numbers.add(number as number)
-    const hasStartLine = startLine !== undefined
-    const hasEndLine = endLine !== undefined
-    if (hasStartLine !== hasEndLine) {
-      throw new SafeToolError(
-        `Comment ${number} must provide both starting and ending lines or neither.`,
+    try {
+      if (!Array.isArray(raw.locations)) {
+        throw new SafeToolError(`Comment ${number} locations must be an array.`)
+      }
+      if (raw.locations.length > MAX_LOCATIONS_PER_COMMENT) {
+        throw new SafeToolError(
+          `Comment ${number} exceeds the limit of ${MAX_LOCATIONS_PER_COMMENT} locations.`,
+        )
+      }
+      if (typeof raw.text !== "string") {
+        throw new SafeToolError(`Comment ${number} requires a text string.`)
+      }
+      if (typeof raw.pullRequestWide !== "boolean") {
+        throw new SafeToolError(`Comment ${number} requires a pullRequestWide boolean.`)
+      }
+      if (raw.locations.length === 0 && raw.pullRequestWide !== true) {
+        throw new SafeToolError(
+          `Comment ${number} requires an explicit file location or pull-request-wide scope.`,
+        )
+      }
+      const severity = validateFindingSeverity(raw.severity, number as number)
+      const commentText = validateCommentText(number as number, severity, raw.text)
+      comments.push({
+        number: number as number,
+        severity,
+        pullRequestWide: raw.pullRequestWide,
+        locations: raw.locations.map((location, locationIndex) =>
+          validateLocation(location, number as number, locationIndex),
+        ),
+        ...commentText,
+      })
+    } catch (error) {
+      skipped.push(
+        skippedItem(
+          number as number,
+          error instanceof SafeToolError
+            ? error.message
+            : `Comment ${number} is invalid and was skipped.`,
+        ),
       )
     }
-    if (hasStartLine) {
-      if (!Number.isSafeInteger(startLine) || (startLine as number) <= 0) {
-        throw new SafeToolError(`Comment ${number} has an invalid starting line.`)
-      }
-      if (
-        !Number.isSafeInteger(endLine) ||
-        (endLine as number) < (startLine as number) ||
-        (endLine as number) - (startLine as number) > 100_000
-      ) {
-        throw new SafeToolError(`Comment ${number} has an invalid ending line.`)
-      }
-    }
-    if (typeof raw.path !== "string" || typeof raw.text !== "string") {
-      throw new SafeToolError(`Comment ${number} requires path and text strings.`)
-    }
-    const severity = validateFindingSeverity(raw.severity, number as number)
-    const commentText = validateCommentText(number as number, severity, raw.text)
-    return {
-      number: number as number,
-      severity,
-      path: normalizeRepositoryPath(raw.path),
-      startLine: hasStartLine ? (startLine as number) : null,
-      endLine: hasEndLine ? (endLine as number) : null,
-      ...commentText,
-    }
-  })
-  return comments.sort((left, right) => left.number - right.number)
-}
-
-function requireInlineLocation(comment: ValidatedComment): InlineValidatedComment {
-  if (comment.startLine === null || comment.endLine === null) {
-    throw new SafeToolError(
-      `Comment ${comment.number} targets a changed file and requires an explicit numeric source location for inline placement.`,
-    )
   }
-  return comment as InlineValidatedComment
+  return {
+    comments: comments.sort((left, right) => left.number - right.number),
+    skipped: skipped.sort((left, right) => left.number - right.number),
+    selectedNumbers: [...numbers].sort((left, right) => left - right),
+  }
 }
 
 function validateRepositoryPart(value: string, label: string): string {
@@ -822,13 +904,55 @@ async function ensureFileExistsAtHead(
   url.searchParams.set("at", pullRequest.sourceHead)
   url.searchParams.set("start", "0")
   url.searchParams.set("limit", "1")
-  const payload = requireRecord(
-    await requestJson(url, config, "GET", undefined, "Unchanged-file verification"),
-    "repository file",
-  )
+  let raw: unknown
+  try {
+    raw = await requestJson(url, config, "GET", undefined, "Unchanged-file verification")
+  } catch (error) {
+    if (error instanceof SafeToolError && error.message.includes("HTTP 404")) {
+      throw new InvalidLocationError(
+        `Comment path ${path} is neither changed in the pull request nor present at the reviewed head revision.`,
+      )
+    }
+    throw error
+  }
+  const payload = requireRecord(raw, "repository file")
   if (!Array.isArray(payload.lines)) {
-    throw new SafeToolError(
+    throw new InvalidLocationError(
       `Comment path ${path} is unchanged in the pull request but is not a file at the reviewed head revision.`,
+    )
+  }
+}
+
+async function ensureLineExistsAtHead(
+  baseUrl: URL,
+  pullRequest: PullRequestIdentity,
+  location: InlineCandidateLocation,
+  config: RequestConfig,
+): Promise<void> {
+  const url = apiUrl(
+    baseUrl,
+    `/rest/api/latest/projects/${encodeURIComponent(pullRequest.targetProjectKey)}` +
+      `/repos/${encodeURIComponent(pullRequest.targetRepositorySlug)}` +
+      `/browse/${encodeRepositoryPath(location.path)}`,
+  )
+  url.searchParams.set("at", pullRequest.sourceHead)
+  url.searchParams.set("start", String(location.endLine - 1))
+  url.searchParams.set("limit", "1")
+  let raw: unknown
+  try {
+    raw = await requestJson(url, config, "GET", undefined, "Source-line verification")
+  } catch (error) {
+    if (error instanceof SafeToolError && error.message.includes("HTTP 404")) {
+      throw new InvalidLocationError(
+        `Comment ${location.number} path ${location.path} is not present at the reviewed head revision.`,
+      )
+    }
+    throw error
+  }
+  const payload = requireRecord(raw, "repository source line")
+  if (!Array.isArray(payload.lines) || payload.lines.length === 0) {
+    throw new InvalidLocationError(
+      `Comment ${location.number} line ${location.endLine} does not exist in ${location.path} at the reviewed head revision.`,
     )
   }
 }
@@ -854,6 +978,8 @@ type ParsedDestinationDiff = {
   truncated: boolean
 }
 
+type DiffCache = Map<string, Promise<ParsedDestinationDiff>>
+
 function isTruncated(value: unknown): boolean {
   return value === true || value === "true"
 }
@@ -874,7 +1000,8 @@ export function parseStructuredDestinationDiffLines(
     const diff = requireRecord(rawDiff, "pull request file diff entry")
     truncated ||= isTruncated(diff.truncated)
     if (diff.binary === true) {
-      throw new SafeToolError(
+      throw new GeneralPlacementError(
+        "binary-file",
         `Comment path ${expectedPath} is binary and cannot receive an inline text comment.`,
       )
     }
@@ -939,7 +1066,7 @@ export function parseStructuredDestinationDiffLines(
 }
 
 function selectAnchor(
-  comment: InlineValidatedComment,
+  comment: InlineCandidateLocation,
   diffLines: Map<string, Map<number, DiffLine>>,
 ): InlineAnchor | null {
   const fileLines = diffLines.get(comment.path)
@@ -980,12 +1107,13 @@ function selectAnchor(
 }
 
 function expandedContextLines(
-  comment: InlineValidatedComment,
+  comment: InlineCandidateLocation,
   diffLines: Map<string, Map<number, DiffLine>>,
 ): number {
   const fileLines = diffLines.get(comment.path)
   if (!fileLines || fileLines.size === 0) {
-    throw new SafeToolError(
+    throw new GeneralPlacementError(
+      "no-destination-lines",
       `Comment ${comment.number} path ${comment.path} has no destination lines in its pull request diff.`,
     )
   }
@@ -1014,7 +1142,13 @@ async function fetchFileDiffLines(
   change: PullRequestChange,
   contextLines: number,
   config: RequestConfig,
+  cache: DiffCache,
 ): Promise<ParsedDestinationDiff> {
+  const cacheKey = `${change.path}\u0000${change.srcPath ?? ""}\u0000${contextLines}`
+  const cached = cache.get(cacheKey)
+  if (cached) {
+    return cached
+  }
   const url = new URL(
     `${pullRequestApiUrl(baseUrl, pullRequest).toString()}` +
       `/diff/${encodeRepositoryPath(change.path)}`,
@@ -1025,25 +1159,28 @@ async function fetchFileDiffLines(
   if (change.srcPath) {
     url.searchParams.set("srcPath", change.srcPath)
   }
-  const diff = await requestJson(
+  const lookup = requestJson(
     url,
     config,
     "GET",
     undefined,
     "Inline-anchor structured diff lookup",
-  )
-  return parseStructuredDestinationDiffLines(diff, change.path)
+  ).then((diff) => parseStructuredDestinationDiffLines(diff, change.path))
+  cache.set(cacheKey, lookup)
+  return lookup
 }
 
 async function resolveInlineAnchor(
   baseUrl: URL,
   pullRequest: PullRequestIdentity,
-  comment: InlineValidatedComment,
+  comment: InlineCandidateLocation,
   change: PullRequestChange,
   config: RequestConfig,
+  cache: DiffCache,
 ): Promise<InlineAnchor> {
   if (change.type.toUpperCase() === "DELETE") {
-    throw new SafeToolError(
+    throw new GeneralPlacementError(
+      "deleted-file",
       `Comment ${comment.number} targets a deleted file and cannot be anchored on the destination side.`,
     )
   }
@@ -1053,26 +1190,30 @@ async function resolveInlineAnchor(
     change,
     INITIAL_DIFF_CONTEXT_LINES,
     config,
+    cache,
   )
   const initialAnchor = selectAnchor(comment, initialDiff.lines)
   if (initialAnchor) {
     return initialAnchor
   }
+  await ensureLineExistsAtHead(baseUrl, pullRequest, comment, config)
   const expandedDiff = await fetchFileDiffLines(
     baseUrl,
     pullRequest,
     change,
     expandedContextLines(comment, initialDiff.lines),
     config,
+    cache,
   )
   const expandedAnchor = selectAnchor(comment, expandedDiff.lines)
   if (!expandedAnchor) {
     if (expandedDiff.truncated) {
-      throw new SafeToolError(
+      throw new GeneralPlacementError(
+        "diff-truncated",
         `Comment ${comment.number} lines ${comment.startLine}-${comment.endLine} are outside Bitbucket's truncated structured file diff.`,
       )
     }
-    throw new SafeToolError(
+    throw new InvalidLocationError(
       `Comment ${comment.number} lines ${comment.startLine}-${comment.endLine} cannot be anchored after expanding the changed file diff.`,
     )
   }
@@ -1231,6 +1372,103 @@ async function findDuplicateGeneralComment(
   throw new SafeToolError("Bitbucket activity pagination exceeded the safe page limit.")
 }
 
+async function prepareComment(
+  baseUrl: URL,
+  pullRequest: PullRequestIdentity,
+  input: ValidatedComment,
+  changes: Map<string, PullRequestChange>,
+  config: RequestConfig,
+  diffCache: DiffCache,
+): Promise<PreparedComment> {
+  let generalReason: string | null = input.pullRequestWide ? "pull-request-scope" : null
+  const invalidReasons: string[] = []
+
+  for (const location of input.locations) {
+    const change = changes.get(location.path)
+    if (!change) {
+      try {
+        await ensureFileExistsAtHead(baseUrl, pullRequest, location.path, config)
+        generalReason ??= "unchanged-file"
+      } catch (error) {
+        if (error instanceof InvalidLocationError) {
+          invalidReasons.push(error.message)
+          continue
+        }
+        throw error
+      }
+      continue
+    }
+
+    if (location.startLine === null || location.endLine === null) {
+      generalReason ??= "no-numeric-location"
+      continue
+    }
+
+    const candidate: InlineCandidateLocation = {
+      number: input.number,
+      path: location.path,
+      startLine: location.startLine,
+      endLine: location.endLine,
+    }
+    try {
+      const anchor = await resolveInlineAnchor(
+        baseUrl,
+        pullRequest,
+        candidate,
+        change,
+        config,
+        diffCache,
+      )
+      const alreadyPostedId = await findDuplicateInlineComment(
+        baseUrl,
+        pullRequest,
+        { text: input.inlineText, anchor },
+        config,
+      )
+      return {
+        input,
+        placement: "inline",
+        placementReason: "resolved-diff-anchor",
+        text: input.inlineText,
+        anchor,
+        alreadyPostedId,
+      }
+    } catch (error) {
+      if (error instanceof GeneralPlacementError) {
+        generalReason ??= error.placementReason
+        continue
+      }
+      if (error instanceof InvalidLocationError) {
+        invalidReasons.push(error.message)
+        continue
+      }
+      throw error
+    }
+  }
+
+  if (generalReason !== null) {
+    const alreadyPostedId = await findDuplicateGeneralComment(
+      baseUrl,
+      pullRequest,
+      input.fullText,
+      config,
+    )
+    return {
+      input,
+      placement: "general",
+      placementReason: generalReason,
+      text: input.fullText,
+      alreadyPostedId,
+    }
+  }
+
+  throw new InvalidLocationError(
+    invalidReasons.length > 0
+      ? invalidReasons.join(" ")
+      : `Comment ${input.number} has no valid location at the reviewed head revision.`,
+  )
+}
+
 async function postComment(
   baseUrl: URL,
   pullRequest: PullRequestIdentity,
@@ -1262,12 +1500,13 @@ function commentWebUrl(prUrl: string, commentId: number): string {
 
 function blockedResult(reason: string, numbers: number[]): PublicationResult {
   return {
-    schemaVersion: "2",
+    schemaVersion: "3",
     status: "blocked",
     pullRequest: null,
     comments: numbers.map((number) => ({
       number,
       placement: null,
+      placementReason: null,
       status: "not-attempted",
       commentId: null,
       url: null,
@@ -1299,8 +1538,18 @@ export async function sendBitbucketComments(args: {
     ) {
       throw new SafeToolError("reviewedHeadRevision must be a full Git revision.")
     }
-    const comments = validateComments(args.comments)
-    selectedNumbers = comments.map((comment) => comment.number)
+    const validation = validateComments(args.comments)
+    const comments = validation.comments
+    selectedNumbers = validation.selectedNumbers
+    if (comments.length === 0) {
+      return JSON.stringify({
+        schemaVersion: "3",
+        status: "partial",
+        pullRequest: null,
+        comments: validation.skipped,
+        reason: "No selected finding was valid for publication.",
+      } satisfies PublicationResult)
+    }
     const sourceBranch = normalizeBranch(args.sourceBranch)
     const reviewedHead = args.reviewedHeadRevision.toLowerCase()
     const baseUrl = parseBaseUrl(requiredEnv("BITBUCKET_SERVER"))
@@ -1346,50 +1595,27 @@ export async function sendBitbucketComments(args: {
     }
 
     const changes = await getPullRequestChanges(baseUrl, current, config)
+    const diffCache: DiffCache = new Map()
     const prepared: PreparedComment[] = []
+    const publicationItems: PublicationItem[] = [...validation.skipped]
     for (const input of comments) {
-      const change = changes.get(input.path)
-      if (change) {
-        const inlineInput = requireInlineLocation(input)
-        const anchor = await resolveInlineAnchor(
-          baseUrl,
-          current,
-          inlineInput,
-          change,
-          config,
+      try {
+        prepared.push(
+          await prepareComment(baseUrl, current, input, changes, config, diffCache),
         )
-        const text = input.inlineText
-        const alreadyPostedId = await findDuplicateInlineComment(
-          baseUrl,
-          current,
-          { text, anchor },
-          config,
-        )
-        prepared.push({
-          input: inlineInput,
-          placement: "inline",
-          text,
-          anchor,
-          alreadyPostedId,
-        })
-        continue
+      } catch (error) {
+        if (error instanceof InvalidLocationError) {
+          publicationItems.push(skippedItem(input.number, error.message))
+          continue
+        }
+        throw error
       }
-      await ensureFileExistsAtHead(baseUrl, current, input.path, config)
-      const text = input.fullText
-      const alreadyPostedId = await findDuplicateGeneralComment(
-        baseUrl,
-        current,
-        text,
-        config,
-      )
-      prepared.push({ input, placement: "general", text, alreadyPostedId })
     }
 
     const prUrl = pullRequestWebUrl(baseUrl, current)
-    const publicationItems: PublicationItem[] = []
     result = {
-      schemaVersion: "2",
-      status: "completed",
+      schemaVersion: "3",
+      status: publicationItems.length > 0 ? "partial" : "completed",
       pullRequest: {
         projectKey: current.targetProjectKey,
         repositorySlug: current.targetRepositorySlug,
@@ -1400,7 +1626,10 @@ export async function sendBitbucketComments(args: {
         url: prUrl,
       },
       comments: publicationItems,
-      reason: null,
+      reason:
+        publicationItems.length > 0
+          ? "One or more invalid selected findings were skipped."
+          : null,
     }
 
     for (let index = 0; index < prepared.length; index += 1) {
@@ -1409,6 +1638,7 @@ export async function sendBitbucketComments(args: {
         publicationItems.push({
           number: item.input.number,
           placement: item.placement,
+          placementReason: item.placementReason,
           status: "already-posted",
           commentId: item.alreadyPostedId,
           url: commentWebUrl(prUrl, item.alreadyPostedId),
@@ -1426,6 +1656,7 @@ export async function sendBitbucketComments(args: {
         publicationItems.push({
           number: item.input.number,
           placement: item.placement,
+          placementReason: item.placementReason,
           status: "failed",
           commentId: null,
           url: null,
@@ -1435,6 +1666,7 @@ export async function sendBitbucketComments(args: {
           publicationItems.push({
             number: remaining.input.number,
             placement: remaining.placement,
+            placementReason: remaining.placementReason,
             status: "not-attempted",
             commentId: null,
             url: null,
@@ -1452,6 +1684,7 @@ export async function sendBitbucketComments(args: {
         publicationItems.push({
           number: item.input.number,
           placement: item.placement,
+          placementReason: item.placementReason,
           status: "posted",
           commentId,
           url: commentWebUrl(prUrl, commentId),
@@ -1461,6 +1694,7 @@ export async function sendBitbucketComments(args: {
         publicationItems.push({
           number: item.input.number,
           placement: item.placement,
+          placementReason: item.placementReason,
           status: "failed",
           commentId: null,
           url: null,
@@ -1473,6 +1707,7 @@ export async function sendBitbucketComments(args: {
           publicationItems.push({
             number: remaining.input.number,
             placement: remaining.placement,
+            placementReason: remaining.placementReason,
             status: "not-attempted",
             commentId: null,
             url: null,
@@ -1484,6 +1719,7 @@ export async function sendBitbucketComments(args: {
         break
       }
     }
+    publicationItems.sort((left, right) => left.number - right.number)
     return JSON.stringify(result)
   } catch (error) {
     const reason =
@@ -1493,6 +1729,7 @@ export async function sendBitbucketComments(args: {
     if (mutationStarted && result) {
       result.status = "partial"
       result.reason = reason
+      result.comments.sort((left, right) => left.number - right.number)
       return JSON.stringify(result)
     }
     return JSON.stringify(blockedResult(reason, selectedNumbers))
@@ -1503,7 +1740,7 @@ export async function sendBitbucketComments(args: {
 // directly and does not need the @opencode-ai/plugin helper at runtime.
 export default {
   description:
-    "Post explicitly selected findings with severity-labelled headings as Bitbucket Data Center inline comments for changed files or general pull request comments for unchanged files after complete preflight validation.",
+    "Post selected findings to Bitbucket, preferring the first resolvable inline location and otherwise using a general pull request comment; skip invalid findings and preflight all writes.",
   args: {
     repositoryUrl: {
       type: "string",
@@ -1527,32 +1764,48 @@ export default {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["number", "severity", "path", "text"],
+        required: ["number", "severity", "locations", "pullRequestWide", "text"],
         properties: {
           number: { type: "integer", minimum: 1 },
           severity: {
             type: "string",
             enum: ["Critical", "Major", "Minor"],
-            description: "Finding severity from its enclosing final-report section",
+            description: "Enclosing or associated severity of the selected finding",
           },
-          path: { type: "string", minLength: 1 },
-          startLine: {
-            type: "integer",
-            minimum: 1,
-            description:
-              "Numeric location start when present in the report; required after classification for changed-file inline placement",
+          locations: {
+            type: "array",
+            minItems: 0,
+            maxItems: MAX_LOCATIONS_PER_COMMENT,
+            description: "All explicit candidate locations from the selected finding, in report order",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["path"],
+              properties: {
+                path: { type: "string", minLength: 1 },
+                startLine: {
+                  type: "integer",
+                  minimum: 1,
+                  description: "Explicit numeric location start when present in the finding",
+                },
+                endLine: {
+                  type: "integer",
+                  minimum: 1,
+                  description: "Explicit numeric location end when present in the finding",
+                },
+              },
+            },
           },
-          endLine: {
-            type: "integer",
-            minimum: 1,
+          pullRequestWide: {
+            type: "boolean",
             description:
-              "Numeric location end when present in the report; required after classification for changed-file inline placement",
+              "True only when the finding explicitly identifies pull-request-wide scope instead of a file location",
           },
           text: {
             type: "string",
             minLength: 1,
             description:
-              "Exact final-report finding block including its Location line",
+              "Exact selected finding block including its Location line",
           },
         },
       },

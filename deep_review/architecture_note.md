@@ -4,7 +4,7 @@
 
 This document explains how the OpenCode deep-review MVP should work and how its responsibilities should be divided during implementation. The design aims to preserve deep, layer-specific review focus without adding unnecessary skills or allowing one layer to hide problems in another.
 
-The `/deep-review` workflow is read-only. After validating its numbered final report, the developer may use the separate `/send-comments` command to post an explicitly selected subset as Bitbucket Data Center inline comments for changed files or general pull-request comments for unchanged files. No review task receives posting permission.
+The `/deep-review` workflow is read-only. After validating its numbered final report or a finding formed through later review checks and discussion, the developer may use the separate `/send-comments` command to post an explicitly selected subset to Bitbucket Data Center, preferring inline placement and otherwise using a general pull-request comment. No review task receives posting permission.
 
 ## Design principles
 
@@ -63,12 +63,11 @@ The command should stay small. Review behavior belongs in the skill and its refe
 
 The command is a separate, explicitly mutating entry point. It should:
 
-- Accept a comma-separated list of unique positive final-report numbers, with optional whitespace around commas, for example `/send-comments 1, 3`.
-- Operate only on the latest completed deep-review report in the same OpenCode session.
-- Copy each selected finding block exactly, including its `Location:` line.
-- Pass the finding severity from its enclosing report section separately and require exactly `Critical`, `Major` or `Minor`.
-- Parse each repository path, pass numeric lines only when explicitly present in the report and never derive missing lines from repository searches.
-- Pass the complete selected batch to `bitbucket-send-comments` once; the tool permits missing lines only for unchanged-file general comments.
+- Accept a comma-separated list of unique positive finding numbers, with optional whitespace around commas, for example `/send-comments 1, 3`.
+- Use the latest completed deep-review report as the source of reviewed revisions.
+- Use each selected number's most recent complete finding block from the report or later review checks and discussion in the same session.
+- Copy each selected block exactly, pass its severity separately, and extract every explicit location or stated pull-request-wide scope without deriving lines.
+- Report malformed selected findings as skipped and pass all publishable findings to `bitbucket-send-comments` once.
 - Stop without posting when the report, selection, reviewed revision, source branch or Git remote is missing or ambiguous.
 
 The command must not re-run review work, rewrite selected findings or use a general-purpose HTTP or shell operation to post comments.
@@ -82,16 +81,16 @@ The narrow TypeScript posting tool should:
 - Validate the configured Bitbucket Data Center server, access token, proxy and CA bundle without returning or logging secrets.
 - Resolve exactly one open outgoing pull request for the repository, reviewed source branch and reviewed head revision.
 - Re-fetch the pull request and require its current head to equal the reviewed head.
-- Read the complete pull-request change list and classify every selected file as changed or unchanged.
-- For a changed file, require explicit numeric report lines, read its structured effective diff, use Bitbucket's destination line numbers and segment types, expand context when necessary and require a destination-side inline anchor.
-- For an unchanged file, verify that it exists at the reviewed head and prepare a general pull-request comment.
-- Validate the complete batch before the first write.
+- Read the complete pull-request change list and validate every candidate location.
+- Try every changed-file location with explicit lines against Bitbucket's structured effective diff, expanding context when needed, and use the first destination-side anchor.
+- Use one general pull-request comment when a valid finding has no resolvable inline anchor; skip a finding with no valid location.
+- Validate every publishable finding before the first write; keep PR, branch, head and API failures as whole-request blocks.
 - Replace each numbered report heading with `### <severity>: <title>` so the posted comment exposes severity without the internal finding number.
 - Remove `Location:` only from inline comments and retain it in general pull-request comments.
 - Detect an already-posted inline comment by exact text and anchor through the path-scoped comments API, or an exact general comment through pull-request activity.
 - Return the preflight stage and a sanitized Bitbucket error message when an API request fails.
 - Post comments in final-report order and never retry a POST automatically.
-- Return explicit `posted`, `already-posted`, `failed` or `not-attempted` status for every selected finding.
+- Return placement, placement reason and explicit `posted`, `already-posted`, `skipped`, `failed` or `not-attempted` status for every selected finding.
 
 The minimum PR lookup and diff read required for safe publication remain internal to this tool. Existing PR discussions and other PR data are not added to `ReviewInput` in this phase.
 
@@ -424,9 +423,9 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 12. The Plan agent deduplicates overlapping candidates and finalizes severity.
 13. The Plan agent writes the final report once using the exact Markdown format reference.
 14. OpenCode shows the complete report to the developer.
-15. After validating the report, the developer may run `/send-comments` with selected finding numbers.
-16. The command copies the selected finding blocks exactly, includes their location lines, passes each enclosing severity separately and calls `bitbucket-send-comments` once.
-17. The tool resolves the matching PR, validates the reviewed head, classifies selected files, expands changed-file diff context when needed, checks duplicates and posts the validated batch.
+15. After validating the report or a later finding formed through additional checks and discussion, the developer may run `/send-comments` with selected finding numbers.
+16. The command takes reviewed revisions from the latest report and passes each publishable finding's exact block, severity and explicit locations to `bitbucket-send-comments` once.
+17. The tool validates the matching PR and all locations, prefers the first resolvable inline anchor, otherwise uses a general comment, skips invalid findings, checks duplicates and posts the preflighted batch.
 
 ## Failure and limitation handling
 
@@ -443,13 +442,11 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 | A required report field lacks verified information | Do not invent content; preserve the gap as a material limitation where applicable. |
 | Review target changes during execution | Restart with a new frozen target or report that results are not valid for one consistent revision. |
 | `/send-comments` has no latest complete report in the session | Stop without calling Bitbucket. |
-| A selected number or repository path is missing or ambiguous | Stop before posting any comment. |
-| A selected changed file has no explicit numeric source location | Stop before posting any comment. |
-| An unchanged-file location has no numeric lines | Post a general pull-request comment without deriving lines. |
+| A selected finding is malformed | Skip that finding and continue with the preflighted valid findings. |
+| At least one changed location has a resolvable destination line | Post inline at the first resolvable location. |
+| A valid finding has no resolvable inline location | Post one general pull-request comment retaining its `Location:` line. |
 | No single open PR matches the repository, source branch and reviewed head | Stop before posting any comment. |
-| A selected changed-file location cannot be anchored after expanding the structured effective file diff | Stop before posting any comment. |
-| A selected file is unchanged in the PR | Post a general pull-request comment and retain its `Location:` line. |
-| A selected file cannot be classified or does not exist at the reviewed head | Stop before posting any comment. |
+| No candidate location is valid in the PR or at the reviewed head | Skip that finding. |
 | A POST fails after earlier comments succeeded | Stop further publication and return per-comment partial status; never claim atomic rollback. |
 
 ## MVP boundaries
@@ -462,7 +459,7 @@ The MVP includes:
 - Finding verification and deduplication.
 - Stable severity-prioritized text output.
 - Read-only review execution.
-- Explicit publication of selected numbered findings as inline comments for changed files or general pull-request comments for unchanged files.
+- Explicit publication of selected numbered findings from the report or later review discussion, preferring inline placement and otherwise using general pull-request comments.
 
 The MVP does not include:
 
@@ -484,7 +481,7 @@ The MVP does not include:
 5. Implement verification and deduplication rules.
 6. Configure least-privilege permissions.
 7. Implement numbered report findings, `/send-comments` and `bitbucket-send-comments`.
-8. Validate PR ambiguity, stale heads, unanchorable locations, duplicate detection and partial POST failures.
+8. Validate PR ambiguity, stale heads, multi-location inline selection, general fallback, invalid-finding skips, duplicate detection and partial POST failures.
 9. Forward-test the complete workflow on realistic review targets using fresh sessions and raw artifacts.
 
 Forward testing should confirm:
@@ -496,4 +493,6 @@ Forward testing should confirm:
 - Jira incompleteness is visible and does not become a false success claim.
 - Duplicate findings collapse without losing evidence.
 - The final Markdown follows the exact structure across equivalent verified findings.
+- A complete numbered finding formed through later checks and discussion can be selected without repeating the deep review.
+- Every valid inline candidate is tried before general fallback, while invalid findings are skipped without weakening global PR/head gates.
 - No code modification occurs, and review posting occurs only for numbers explicitly selected through `/send-comments`.

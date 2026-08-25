@@ -5,14 +5,13 @@ Consolidate the layer results into one verified, deduplicated set of final findi
 ## Consolidation rules
 
 - Include only candidates verified against the frozen review target.
-- Give every finding a concise `title` that summarizes the verified problem without adding a new claim.
-- Preserve the strongest verified evidence and the narrowest accurate location.
+- Use a short, plain-language `title` that states what can go wrong; omit implementation names unless essential.
+- Explain the problem and impact in two or three short, self-contained sentences; keep technical detail in the strongest verified evidence and retain every materially relevant location, with numeric lines whenever known.
 - Assign the highest justified severity, not automatically the highest proposed severity.
 - Merge candidates only when they share one root cause and one material fix.
 - Preserve multiple `sourceLayers` when independent layers found the same defect.
-- State material requirement, target, coverage, or check limitations in the final report summary.
-- Do not use a finding to represent uncertainty alone.
-- After severity assignment and final sorting, number all findings consecutively across severity groups, starting at `1`. These final report numbers are the only identifiers accepted by `/send-comments`.
+- State material limitations in the final summary; never turn uncertainty into a finding.
+- After severity assignment and final sorting, number all findings consecutively across severity groups, starting at `1`. `/send-comments` accepts these numbers and numbers assigned to complete findings formed during later review checks and discussion in the same session.
 
 ## Severity rules
 

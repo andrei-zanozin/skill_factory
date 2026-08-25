@@ -4,10 +4,8 @@ Return only the final Markdown report. Do not output intermediate JSON, a manife
 
 ## Content integrity
 
-- Use only the final findings established during verification and deduplication.
-- Render every final finding exactly once.
-- Do not add or remove findings while formatting.
-- Do not change severity, meaning, evidence, or limitations while formatting.
+- Use only final findings established during verification and deduplication; render each exactly once.
+- While formatting, do not add or remove findings or change their severity, meaning, evidence, or limitations.
 - Keep material requirement, target, coverage, and check limitations visible.
 
 ## Ordering
@@ -33,7 +31,7 @@ Limitations:
 
 ## Critical
 
-### 1. <Concise Critical finding title>
+### 1. <Plain-language Critical finding title>
 
 - Location: `<file>:<lines>` (`<symbol>`)
 - Problem and impact: <problem> <impact>
@@ -42,7 +40,7 @@ Limitations:
 
 ## Major
 
-### 2. <Concise Major finding title>
+### 2. <Plain-language Major finding title>
 
 - Location: `<file>:<lines>` (`<symbol>`)
 - Problem and impact: <problem> <impact>
@@ -51,7 +49,7 @@ Limitations:
 
 ## Minor
 
-### 3. <Concise Minor finding title>
+### 3. <Plain-language Minor finding title>
 
 - Location: `<file>:<lines>` (`<symbol>`)
 - Problem and impact: <problem> <impact>
@@ -68,8 +66,7 @@ Apply these rules literally:
 - Repeat the finding block for every finding in the required order.
 - Number findings consecutively in their final rendered order across all severity groups, starting at `1`. Never restart numbering for a new severity group and never expose layer candidate IDs.
 - Keep the labels `Location:`, `Problem and impact:`, `Suggested fix:`, and `Evidence:` exactly as written and in that order.
-- Render the location as `` `<file>` `` when lines are unavailable; otherwise render `` `<file>:<lines>` ``.
-- Append `` (`<symbol>`) `` only when a symbol is available.
+- Render every verified location on the one `Location:` line, in evidence order, as `` `<file>` `` or `` `<file>:<lines>` ``; include known lines, append `` (`<symbol>`) `` only when available, and use `PR` only for genuinely pull-request-wide findings.
 - Keep paths, revisions, line ranges, and symbols inside backticks.
 - Escape Markdown metacharacters in dynamic prose when they would otherwise change its intended display.
 
