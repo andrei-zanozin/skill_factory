@@ -1,20 +1,18 @@
 ---
-description: Deep-review a Git branch against an optional target branch and Jira requirement
+description: Deep-review a Bitbucket pull request against a Jira requirement
 agent: plan
 ---
 
-Review a source Git branch against a target Git branch and a Jira requirement.
+Review one Bitbucket pull request against one Jira requirement.
 
-Distinguish the command form only by the number of whitespace-separated arguments:
+Accept exactly two whitespace-separated arguments: `$1` is the Bitbucket pull-request URL and `$2` is the Jira issue key or URL. With any other argument count, stop and show:
 
-- With exactly two arguments, treat `$1` as the source Git branch, use `develop` as the target Git branch, and treat `$2` as the Jira issue key or URL.
-- With exactly three arguments, treat `$1` as the source Git branch, `$2` as the target Git branch, and `$3` as the Jira issue key or URL.
-- With any other argument count, stop and show this usage:
+`/deep-review <bitbucket-pull-request-url> <jira-issue-key-or-url>`
 
-`/deep-review <source-branch> [target-branch] <jira-issue-key-or-url>`
+Require an absolute HTTP(S) Bitbucket Data Center URL whose path identifies exactly one project, repository and positive pull-request ID. Reject credentials, query parameters, fragments, and malformed or ambiguous paths. Pass the derived project, repository and ID only to `bitbucket_get_pull_request`; do not search for or infer a different pull request. Pass the Jira value only to `jira-requirement`, which must validate the issue key or permitted Jira URL before retrieval.
 
-Keep the operation read-only. Validate both branch names before using them and never interpolate either into an unrestricted command. Pass the Jira value only to the narrow read-only requirement integration, which must validate the issue key or permitted Jira URL before retrieval.
+Keep the operation read-only. Require the pull request to be open and to expose non-empty source and target branch names and full source and target revisions. Resolve the local Git remote that corresponds to the URL's host, project and repository; stop if the repository, remote or URL context is inconsistent or ambiguous.
 
-Resolve the source and selected target branch heads to immutable revisions and use their merge base as the immutable comparison revision. Use only the target selected by the argument-count rules above: the explicit target for three arguments or `develop` for two arguments. Never infer, substitute, or fall back to any other default, cached, historical, or previously used branch. Stop and report the ambiguity if either branch or revision cannot be resolved safely. Do not check out, switch, reset, or modify either branch.
+Resolve the exact source and target revisions reported by Bitbucket in the local repository and use their merge base as the immutable comparison revision. Require the resolved branch heads to match the Bitbucket revisions; never substitute another branch, pull request or cached revision. Stop when any identity or revision cannot be verified safely. Do not check out, switch, reset or modify a branch.
 
-Load the `deep-code-review` skill. Use the resolved source/target branch diff, immutable revisions, and normalized Jira result as the frozen review input, then run the complete skill workflow. Enforce all of the skill's orchestration gates; if any gate fails, stop instead of producing a review report. Otherwise, return only the skill's final review report.
+Load the `deep-code-review` skill. Freeze the validated pull-request URL as the review-target identifier together with its repository, branches, immutable revisions, merge base, diff and normalized Jira result. Enforce every skill orchestration gate. If any gate fails, stop instead of producing a review report; otherwise return only the final report and preserve the complete pull-request URL in its `Review target:` line.
