@@ -19,7 +19,7 @@ permission:
   "bitbucket_*": deny
   bitbucket_get_pull_request: allow
   bitbucket_get_pull_request_comments: allow
-  bitbucket_add_pull_request_comment: ask
+  bitbucket_add_pull_request_comment: allow
 ---
 
 Execute only the `/send-comments` command workflow. Treat the user's numbered command arguments as authorization for exactly those findings and no others.
