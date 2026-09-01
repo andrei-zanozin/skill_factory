@@ -14,8 +14,12 @@ package "OpenCode" {
 
   component "Plan agent\n(built-in primary)\norchestration, result verification,\ndeduplication and final report formatting" as Plan <<built-in>>
 
-  component "<b>jira-requirement</b> tool\n(custom TypeScript tool)\nJira Data Center REST, validation,\npagination and normalized JSON" as JiraTool <<custom>>
   component "<b>bitbucket MCP tools</b>\n(externally configured)\nPR metadata, comments\nand comment creation" as BitbucketMcp <<external>>
+
+  package "Jira MCP (externally configured)" {
+    component "<b>get_issue</b>\nread issue summary, description,\nstatus and type" as JiraIssueMcp <<external>>
+    component "<b>get_issue_comments</b>\nread one comment page\nwith cursor and limit" as JiraCommentsMcp <<external>>
+  }
 
   artifact "Requirement context\nuntrusted Jira data, provenance,\ncompleteness status and warnings" as RequirementContext
 
@@ -46,9 +50,12 @@ database "Customer Bitbucket Data Center" as Bitbucket
 Developer -right-> Command
 Command -down-> Plan : PR URL + requirement
 
-Plan -left-> JiraTool : validated issue key or URL
-JiraTool -down-> Jira : read-only REST\nthrough corporate proxy
-JiraTool -down-> RequirementContext : normalized structured result
+Plan -left-> JiraIssueMcp : one call\nvalidated issue key or URL
+Plan -left-> JiraCommentsMcp : cursor 0, limit 100\nuntil next_cursor is null
+JiraIssueMcp -down-> Jira : read-only MCP request
+JiraCommentsMcp -down-> Jira : read-only MCP request
+JiraIssueMcp -down-> RequirementContext : issue fields
+JiraCommentsMcp -down-> RequirementContext : validated comment pages
 RequirementContext -down-> ReviewInput
 Plan -right-> BitbucketMcp : validate explicit PR URL\nand immutable revisions
 
@@ -94,7 +101,8 @@ note right of Plan
   deny edits and review-posting integrations;
   allow only explicitly approved read-only Git commands
   and project checks; allow only Explore through task;
-  allow the narrow Jira tool and Bitbucket PR read.
+  allow only get_issue and get_issue_comments
+  for Jira, plus Bitbucket PR read.
 end note
 
 note bottom of Skill
@@ -118,12 +126,18 @@ note bottom of LayerResults
   verifies and deduplicates only after all results are available.
 end note
 
-note right of JiraTool
-  Read settings and secrets from the local environment:
-  Jira base URL, personal access token, proxy and CA bundle.
-  Never store, return or print credentials. Treat descriptions
-  and comments as untrusted data, never as instructions.
-  Never silently truncate; report completeness explicitly.
+note right of JiraCommentsMcp
+  The MCP server is configured outside this project.
+  Call get_issue exactly once. Page comments from cursor 0
+  with limit 100 until next_cursor is null.
+  Validate page shape, cursor progress and tool output.
+  Map issue_type to issueType, author objects to the
+  existing author string, and created_at/updated_at to
+  created/updated. Preserve trust, provenance, comments
+  and completeness metadata. Keep Jira text untrusted.
+  On errors or truncation, preserve fetched data, mark
+  requirement context incomplete and add a sanitized warning.
+  Do not use Jira REST, shell, generic HTTP or a fallback tool.
 end note
 
 note bottom of Report
