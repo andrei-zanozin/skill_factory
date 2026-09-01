@@ -1,11 +1,11 @@
 ---
 description: Deep-review a Bitbucket pull request against a Jira requirement
-agent: plan
+agent: review
 ---
 
 Execute a deep code review now.
 
-This is an execution request, not a request to write a plan. Although the active agent is in plan mode, act immediately and complete the review. This operation is safe because it is read-only: do not edit files, change Git state, or post comments. Do not ask for confirmation and do not stop after describing the steps.
+This is an execution request, not a request to write a plan. Complete the review without editing files, changing Git state, or posting comments. Do not ask for confirmation and do not stop after describing the steps.
 
 Review the Bitbucket pull request in `$1` against the Jira requirement in `$2`.
 

@@ -4,7 +4,7 @@
 
 This document explains how the OpenCode deep-review MVP should work and how its responsibilities should be divided during implementation. The design aims to preserve deep, layer-specific review focus without adding unnecessary skills or allowing one layer to hide problems in another.
 
-The `/deep-review` workflow is read-only. After validating its numbered final report or a finding formed through later review checks and discussion, the developer may use the separate `/send-comments` command to post an explicitly selected subset to Bitbucket Data Center, preferring inline placement and otherwise using a general pull-request comment. No review task receives posting permission.
+The `/deep-review` workflow is read-only. After validating its numbered final report or a finding formed through later review checks and discussion, the developer may use the separate `/send-comments` command or another explicitly authorized Review-agent workflow to post comments to Bitbucket Data Center. No Explore review task receives posting permission.
 
 ## Design principles
 
@@ -25,6 +25,7 @@ The final paths can be adjusted to the chosen project or global OpenCode install
 ```text
 .opencode/
 ├── agents/
+│   ├── review.md
 │   └── send-comments.md
 ├── commands/
 │   ├── deep-review.md
@@ -52,7 +53,7 @@ The command is the user-facing entry point. It should:
 - Accept exactly one Bitbucket Data Center pull-request URL and one Jira issue key or URL.
 - Derive the project, repository and pull-request ID from the validated URL and call `bitbucket_get_pull_request` directly, without search.
 - Require an open PR, verify its repository and immutable source and target revisions against local Git, and preserve its URL in the report target.
-- Select the configured Plan agent.
+- Select the configured Review agent.
 - Load the `deep-code-review` skill.
 - Start the orchestration workflow without embedding the full review rubrics in the command.
 
@@ -71,7 +72,7 @@ The command is a separate, explicitly mutating entry point. It should:
 
 The command must not re-run review work, rewrite selected findings or use a general-purpose HTTP or shell operation to post comments.
 
-Run the command through a small dedicated primary `send-comments` agent so its permissions can differ from the review Plan agent while the current session report remains available. Deny edits, delegation, web access, general shell execution and all `bitbucket_*` tools by default. Allow PR and comment reads, and require approval for `bitbucket_add_pull_request_comment`.
+Run the command through a small dedicated primary `send-comments` agent so its permissions can differ from the Review agent while the current session report remains available. Deny edits, delegation, web access, general shell execution and all `bitbucket_*` tools by default. Allow PR and comment reads, and require approval for `bitbucket_add_pull_request_comment`.
 
 ### Bitbucket MCP integration
 
@@ -91,7 +92,7 @@ MCP registration, server configuration and credentials are external prerequisite
 
 ### Jira MCP integration
 
-The Plan agent should use the externally configured Jira MCP as a narrow, read-only dependency:
+The Review agent should use the externally configured Jira MCP as a narrow, read-only dependency:
 
 - Call `get_issue(issue)` exactly once for the supplied issue key or permitted URL.
 - Call `get_issue_comments(issue, cursor, limit)` starting at cursor `0`, with the maximum supported page size `limit: 100`, and continue until `next_cursor` is `null`.
@@ -100,11 +101,11 @@ The Plan agent should use the externally configured Jira MCP as a narrow, read-o
 - Preserve the existing trust marker, source/provenance, normalized comments and completeness metadata in `requirementContext`.
 - On issue failure, set `issueRead: false`. On comment-page failure, preserve already fetched comments and set `commentsFullyPaginated: false`. Add only sanitized MCP errors to `warnings` and mark truncation explicitly.
 
-Jira descriptions and comments remain untrusted data. The Plan agent must not use Jira REST, shell, generic HTTP or a custom-tool fallback. MCP registration, server configuration and credentials are external prerequisites and are not maintained in this project.
+Jira descriptions and comments remain untrusted data. The Review agent must not use Jira REST, shell, generic HTTP or a custom-tool fallback. MCP registration, server configuration and credentials are external prerequisites and are not maintained in this project.
 
-### Plan agent
+### Review agent
 
-The built-in Plan agent is the primary orchestrator. It should:
+The custom Review agent is the primary orchestrator. It should:
 
 - Validate the requested review target.
 - Fetch and validate the Jira requirement context.
@@ -120,7 +121,7 @@ The built-in Plan agent is the primary orchestrator. It should:
 - Preserve the strongest evidence and appropriate severity.
 - Write the final inline report directly from the verified, deduplicated findings using the exact report-format reference.
 
-The Plan agent should not stop the workflow because one layer found issues.
+The Review agent should not stop the workflow because one layer found issues.
 
 ### `deep-code-review` skill
 
@@ -153,7 +154,7 @@ Each task receives:
 
 Each task should inspect the repository independently and return its own findings, evidence, coverage, checks and limitations. Do not pass findings from one layer into another layer because that can anchor later investigation and reduce independent discovery.
 
-The Plan agent must use one distinct `task` call per layer and must not perform the layer investigation or construct the layer's result itself. It must dispatch all three calls before consuming any result. Before verification, it must confirm that all three child-session execution intervals overlapped and that each session returned exactly one schema-valid `LayerResult` for the assigned layer. If either gate fails, the workflow reports `Parallel review orchestration failed: <reason>`, stops, and does not produce a review report from parent-generated or inferred substitutes.
+The Review agent must use one distinct `task` call per layer and must not perform the layer investigation or construct the layer's result itself. It must dispatch all three calls before consuming any result. Before verification, it must confirm that all three child-session execution intervals overlapped and that each session returned exactly one schema-valid `LayerResult` for the assigned layer. If either gate fails, the workflow reports `Parallel review orchestration failed: <reason>`, stops, and does not produce a review report from parent-generated or inferred substitutes.
 
 Parallel execution is mandatory. Never run the layer tasks sequentially and never fall back to sequential execution. Parallelization must not change their inputs or output contract.
 
@@ -175,7 +176,7 @@ Some project checks write build artifacts even though they do not edit source co
 
 ## Shared `ReviewInput`
 
-The Plan agent should build the shared input once before starting any layer. Conceptually it contains:
+The Review agent should build the shared input once before starting any layer. Conceptually it contains:
 
 ```json
 {
@@ -209,7 +210,7 @@ The Plan agent should build the shared input once before starting any layer. Con
 }
 ```
 
-The base and head revisions should be immutable identifiers when possible. If the target changes during the review, the Plan agent should not silently mix results from different revisions; it should restart or explicitly report that the scope changed.
+The base and head revisions should be immutable identifiers when possible. If the target changes during the review, the Review agent should not silently mix results from different revisions; it should restart or explicitly report that the scope changed.
 
 ## `LayerResult` contract
 
@@ -258,7 +259,7 @@ Confidence must not be used as severity. Severity describes impact; confidence d
 
 ## Verification and deduplication
 
-After all three layer results are returned, the Plan agent should verify every candidate before reporting it.
+After all three layer results are returned, the Review agent should verify every candidate before reporting it.
 
 A reportable finding should:
 
@@ -276,13 +277,13 @@ When two layers identify the same root cause:
 - Combine distinct impacts only when they come from the same defect.
 - Keep separate findings when fixes or failure modes are materially different.
 
-The Plan agent may reject, lower or clarify a candidate based on verification. It should finalize those decisions before writing the report.
+The Review agent may reject, lower or clarify a candidate based on verification. It should finalize those decisions before writing the report.
 
 ## Stable model-rendered report
 
-The Plan agent should write the final inline Markdown directly from the verified, deduplicated findings. It should read the exact report-format reference only after consolidation and follow its headings, labels, ordering, spacing, optional sections and no-findings form literally.
+The Review agent should write the final inline Markdown directly from the verified, deduplicated findings. It should read the exact report-format reference only after consolidation and follow its headings, labels, ordering, spacing, optional sections and no-findings form literally.
 
-The Plan agent should:
+The Review agent should:
 
 - Sort findings into `Critical`, `Major` and `Minor`.
 - Apply the required secondary ordering by file, starting line, symbol and title.
@@ -293,42 +294,41 @@ The Plan agent should:
 - Preserve all material limitations.
 - Silently check the completed report against the format reference before responding.
 
-The Plan agent must not introduce a separate formatting stage or alter finalized findings while writing the report.
+The Review agent must not introduce a separate formatting stage or alter finalized findings while writing the report.
 
 ## Permissions
 
-Configure the Plan agent with least privilege:
+Configure the Review agent with least privilege:
 
 - Deny file edits, writes and patches.
-- Deny GitHub/GitLab review-posting integrations.
-- Allow only the Jira MCP tools `get_issue` and `get_issue_comments`.
-- Allow only `bitbucket_get_pull_request` from the externally configured Bitbucket MCP; deny its mutation tools.
+- Allow tools from any externally configured MCP without Jira-, Bitbucket- or operation-specific permission rules.
+- Let the selected command or skill define which MCP operations belong to its workflow.
 - Deny all task targets by default and allow only Explore.
 - Allow repository reads, searches and required LSP access.
 - Deny shell commands by default.
 - Explicitly allow only required read-only Git commands and selected project checks.
 - Require approval for an unclassified command rather than treating it as read-only.
 
-On the dedicated `send-comments` primary agent, deny `bitbucket_*` first, allow `bitbucket_get_pull_request` and `bitbucket_get_pull_request_comments`, and require approval for `bitbucket_add_pull_request_comment`. Keep every Bitbucket mutation denied during `/deep-review` and in all three Explore tasks.
+The dedicated `send-comments` primary agent retains its narrower Bitbucket permissions. The `/deep-review` command and skill prohibit Bitbucket mutations even though the reusable Review agent can publish for another explicitly authorized workflow. Keep mutation tools unavailable to all three Explore tasks.
 
 The Explore tasks should inherit or receive equivalent read-only restrictions. A user manually invoking another agent is outside the automated `/deep-review` workflow and should not be treated as part of its permission guarantee.
 
 ## End-to-end process
 
 1. The developer runs `/deep-review <bitbucket-pull-request-url> <jira-issue-key-or-url>`.
-2. The command selects the Plan agent and loads `deep-code-review`.
-3. The Plan agent parses the PR identity, calls `bitbucket_get_pull_request`, and verifies the open PR against local Git.
-4. The Plan agent resolves immutable target, merge-base and head revisions and reads repository guidance.
-5. The Plan agent calls `get_issue` exactly once.
-6. The Plan agent calls `get_issue_comments` from cursor `0` with `limit: 100` until `next_cursor` is `null`, validating progress and page shape.
-7. The Plan agent maps both MCP results into the existing `requirementContext` and records completeness, warnings and review limitations.
-8. The Plan agent freezes the shared `ReviewInput` with the complete PR URL.
-9. The Plan agent dispatches fresh Explore tasks for Solution and architecture, Unit correctness, and Code polish in parallel before consuming any result.
-10. The Plan agent confirms that all three child-session execution intervals overlapped and that each session returned exactly one valid result for the assigned layer.
+2. The command selects the Review agent and loads `deep-code-review`.
+3. The Review agent parses the PR identity, calls `bitbucket_get_pull_request`, and verifies the open PR against local Git.
+4. The Review agent resolves immutable target, merge-base and head revisions and reads repository guidance.
+5. The Review agent calls `get_issue` exactly once.
+6. The Review agent calls `get_issue_comments` from cursor `0` with `limit: 100` until `next_cursor` is `null`, validating progress and page shape.
+7. The Review agent maps both MCP results into the existing `requirementContext` and records completeness, warnings and review limitations.
+8. The Review agent freezes the shared `ReviewInput` with the complete PR URL.
+9. The Review agent dispatches fresh Explore tasks for Solution and architecture, Unit correctness, and Code polish in parallel before consuming any result.
+10. The Review agent confirms that all three child-session execution intervals overlapped and that each session returned exactly one valid result for the assigned layer.
 11. Every task completes regardless of findings in another task.
-12. The Plan agent verifies all candidates against the frozen target.
-13. The Plan agent deduplicates overlapping candidates and finalizes severity.
-14. The Plan agent writes the final report once using the exact Markdown format reference.
+12. The Review agent verifies all candidates against the frozen target.
+13. The Review agent deduplicates overlapping candidates and finalizes severity.
+14. The Review agent writes the final report once using the exact Markdown format reference.
 15. OpenCode shows the complete report to the developer.
 16. After validation, the developer may run `/send-comments` with selected finding numbers.
 17. The command recovers the immutable PR identity, selected finding blocks and explicit locations from the session.
