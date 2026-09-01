@@ -31,15 +31,17 @@ The final paths can be adjusted to the chosen project or global OpenCode install
 │   ├── deep-review.md
 │   └── send-comments.md
 ├── skills/
-│   └── deep-code-review/
-│       ├── SKILL.md
-│       └── references/
-│           ├── solution-and-architecture.md
-│           ├── unit-correctness.md
-│           ├── code-polish.md
-│           ├── layer-result-contract.md
-│           ├── report-contract.md
-│           └── report-format.md
+│   ├── deep-code-review/
+│   │   ├── SKILL.md
+│   │   └── references/
+│   │       ├── solution-and-architecture.md
+│   │       ├── unit-correctness.md
+│   │       ├── code-polish.md
+│   │       ├── layer-result-contract.md
+│   │       ├── report-contract.md
+│   │       └── report-format.md
+│   └── review-comment-format/
+│       └── SKILL.md
 ```
 
 Jira and Bitbucket access use externally configured MCP servers. This project defines only the prompts, review contracts and least-privilege agent permissions that call them; it does not contain Jira transport, credentials or server configuration.
@@ -137,6 +139,10 @@ Use one concise orchestration skill. It should define:
 - Which direct reference to load for each layer and contract.
 
 Keep detailed rubrics and schemas in direct `references/` files so that only the relevant layer instructions need to be loaded for each focused task.
+
+### `review-comment-format` skill
+
+Use one layout-only skill for exactly one PR comment. It is discoverable from free-text requests and is a mandatory fail-closed dependency of `/send-comments`; it does not choose placement, change findings, grant permissions or post comments.
 
 ### Three focused review tasks
 
@@ -332,7 +338,7 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 15. OpenCode shows the complete report to the developer.
 16. After validation, the developer may run `/send-comments` with selected finding numbers.
 17. The command recovers the immutable PR identity, selected finding blocks and explicit locations from the session.
-18. The dedicated agent revalidates the PR, checks exact duplicates, and posts findings sequentially through `bitbucket_add_pull_request_comment`.
+18. The dedicated agent loads `review-comment-format`, revalidates the PR, checks exact duplicates, and posts findings sequentially through `bitbucket_add_pull_request_comment`.
 
 ## Failure and limitation handling
 
@@ -347,6 +353,7 @@ The Explore tasks should inherit or receive equivalent read-only restrictions. A
 | A project check cannot run | Record the failed or skipped check and reason; continue static review where possible. |
 | A layer is blocked | Return a blocked `LayerResult` with coverage and reason; continue the other layers. |
 | Layer findings overlap | Deduplicate after all layers complete and preserve the strongest verified evidence. |
+| `review-comment-format` is unavailable or denied | `/send-comments` stops before any Bitbucket call; do not improvise the comment. |
 | A required report field lacks verified information | Do not invent content; preserve the gap as a material limitation where applicable. |
 | Review target changes during execution | Restart with a new frozen target or report that results are not valid for one consistent revision. |
 | `/send-comments` has no latest complete report in the session | Stop without calling Bitbucket. |
@@ -383,14 +390,14 @@ The MVP does not include:
 
 ## Implementation and validation order
 
-1. Define the `ReviewInput`, `LayerResult`, verified-review and exact Markdown format contracts.
+1. Define the `ReviewInput`, `LayerResult`, verified-review and exact Markdown report contracts.
 2. Validate the existing Jira MCP transcript contract with representative issue responses, pagination, errors and oversized tool output.
 3. Implement the concise `deep-code-review` skill and direct layer references.
 4. Implement the three fresh Explore invocations and verify that all layers run.
 5. Implement verification and deduplication rules.
 6. Configure least-privilege permissions.
 7. Implement PR-URL review targeting and numbered report findings.
-8. Implement `/send-comments` with the externally configured low-level Bitbucket MCP tools.
+8. Implement `review-comment-format` and `/send-comments` with the externally configured low-level Bitbucket MCP tools.
 9. Validate URL parsing, stale heads, start-line placement, general fallback, duplicate detection and partial POST failures.
 10. Forward-test the complete workflow on realistic review targets using fresh sessions and raw artifacts.
 

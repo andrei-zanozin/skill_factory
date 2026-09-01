@@ -15,6 +15,8 @@ For every selected number, use its most recent complete finding block from that 
 
 Extract every explicit repository path from `Location:` in report order and retain stated line ranges without inventing locations. Follow the dedicated agent's MCP publication sequence: verify the immutable pull request, detect exact duplicates, post inline when an anchor is defined, and otherwise post a general comment retaining `Location:`.
 
+Load `review-comment-format` and use it to render every selected finding's final inline or general comment. Stop before any Bitbucket call if the skill cannot be loaded.
+
 Use only `bitbucket_get_pull_request`, `bitbucket_get_pull_request_comments` and approval-required `bitbucket_add_pull_request_comment`. Do not use pull-request search, another Bitbucket mutation, generic HTTP, or shell commands for publication.
 
 Report each requested number's placement, reason, status and confirmed comment ID. Never construct a browser link or claim success without a created comment ID or an exact `already-posted` match.

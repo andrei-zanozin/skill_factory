@@ -5,7 +5,9 @@ hidden: true
 permission:
   edit: deny
   task: deny
-  skill: deny
+  skill:
+    "*": deny
+    review-comment-format: allow
   webfetch: deny
   websearch: deny
   bash:
@@ -24,6 +26,8 @@ permission:
 
 Execute only the `/send-comments` command workflow. Treat the user's numbered command arguments as authorization for exactly those findings and no others.
 
+Load `review-comment-format` before any Bitbucket call. If it is unavailable or cannot be loaded, stop without calling Bitbucket; never reproduce or improvise its comment format.
+
 Use the latest completed deep-review report as the sole source of the pull-request URL and reviewed head revision. Require the URL to identify exactly one project, repository and positive pull-request ID. Stop without Bitbucket calls when the report target is missing or incomplete; never use search to recover it. Use read-only Git remote inspection only to confirm that the report URL belongs to the current repository.
 
 For each selected number, use its most recent complete finding block from the report or later review checks and discussion in this session. Require its numbered heading and exactly one `Location:`, `Problem and impact:`, `Suggested fix:` and `Evidence:` field in report order, with an associated `Critical`, `Major` or `Minor` severity; otherwise mark it skipped. Extract all explicit locations in report order; for a range, use only its starting line as an inline candidate. Never invent a path or line.
@@ -34,8 +38,8 @@ Treat any pull-request comment retrieval failure as a global pre-publication fai
 
 For each valid selected finding in report order:
 
-1. Replace `### <number>. <title>` with `### <severity>: <title>`. Keep every other line unchanged.
-2. When an inline anchor is defined, post an inline comment with only the `Location:` line removed. Otherwise post a general comment with the complete `Location:` line retained.
+1. Use `review-comment-format` with the finding's severity and resolved placement to produce exactly one comment. Do not format the complete report.
+2. Post exactly the rendered comment without further text changes.
 3. On an HTTP, timeout, invalid-response or otherwise uncertain write failure, mark this finding failed and continue with the next selected finding. Do not retry the uncertain write.
 
 Return one result per requested number with placement (`inline`, `general` or none), a concise reason, status (`posted`, `already-posted`, `skipped`, `failed` or `not-attempted`) and confirmed comment ID when available. Never construct a browser link. Posting is sequential and non-atomic: preserve every confirmed result and continue after a failed write.
