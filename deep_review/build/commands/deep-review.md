@@ -1,20 +1,23 @@
 ---
-description: Deep-review a Git branch against an optional target branch and Jira requirement
-agent: plan
+description: Deep-review a Bitbucket pull request against a Jira requirement
+agent: review
 ---
 
-Review a source Git branch against a target Git branch and a Jira requirement.
+Execute a deep code review now.
 
-Distinguish the command form only by the number of whitespace-separated arguments:
+This is an execution request, not a request to write a plan. Complete the review without editing files, changing Git state, or posting comments. Do not ask for confirmation and do not stop after describing the steps.
 
-- With exactly two arguments, treat `$1` as the source Git branch, use `develop` as the target Git branch, and treat `$2` as the Jira issue key or URL.
-- With exactly three arguments, treat `$1` as the source Git branch, `$2` as the target Git branch, and `$3` as the Jira issue key or URL.
-- With any other argument count, stop and show this usage:
+Review the Bitbucket pull request in `$1` against the Jira requirement in `$2`.
 
-`/deep-review <source-branch> [target-branch] <jira-issue-key-or-url>`
+Accept exactly two whitespace-separated arguments:
 
-Keep the operation read-only. Validate both branch names before using them and never interpolate either into an unrestricted command. Pass the Jira value only to the narrow read-only requirement integration, which must validate the issue key or permitted Jira URL before retrieval.
+- `$1`: the Bitbucket pull-request URL.
+- `$2`: the Jira issue key or URL.
 
-Resolve the source and selected target branch heads to immutable revisions and use their merge base as the immutable comparison revision. Use only the target selected by the argument-count rules above: the explicit target for three arguments or `develop` for two arguments. Never infer, substitute, or fall back to any other default, cached, historical, or previously used branch. Stop and report the ambiguity if either branch or revision cannot be resolved safely. Do not check out, switch, reset, or modify either branch.
+With any other argument count, stop and show:
 
-Load the `deep-code-review` skill. Use the resolved source/target branch diff, immutable revisions, and normalized Jira result as the frozen review input, then run the complete skill workflow. Enforce all of the skill's orchestration gates; if any gate fails, stop instead of producing a review report. Otherwise, return only the skill's final review report.
+`/deep-review <bitbucket-pull-request-url> <jira-issue-key-or-url>`
+
+Load the `deep-code-review` skill and follow it completely. It defines the Bitbucket validation, Jira MCP retrieval and normalization, immutable review scope, three-layer parallel orchestration, verification gates, and final report format. Use only the externally configured read-only MCP tools allowed by that skill; never use Jira REST, generic HTTP, or custom-tool fallbacks.
+
+Return the completed final review report only. If a required safety or orchestration gate fails, report that failure instead of inventing review results.
