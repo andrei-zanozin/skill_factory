@@ -82,6 +82,8 @@ Read applicable repository guidance, identify relevant conventions, and define i
 }
 ```
 
+Keep repository paths such as `changedFiles` and `instructionFiles` relative to the Explore session's working directory. Never include parent-session tool-output paths or external absolute paths.
+
 Freeze this object before layer discovery. If the target changes during the review, restart against a new snapshot or report that no single-revision result can be produced. When the identifier is a pull-request URL, preserve that complete URL as the `<review target>` rendered in the final report.
 
 ### 2. Run three independent layers
@@ -97,6 +99,8 @@ For each review process:
 3. Inspect the repository independently.
 4. Return only one structured `LayerResult`.
 5. Do not include another layer's findings, hints, conclusions, or output.
+
+The Explore session already runs at the repository root. Use only relative paths inside that root and inspect the frozen revisions locally. Never read parent-session artifacts or construct duplicated or absolute repository paths.
 
 Use this instruction shape:
 
