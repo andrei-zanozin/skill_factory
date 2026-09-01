@@ -39,6 +39,7 @@ permission:
     "git branch --all": allow
     "git branch --all --verbose": allow
     "git branch --all --verbose --no-abbrev": allow
+    "git branch --all --contains *": allow
     "git branch -a": allow
     "git branch -av": allow
     "git branch -avv": allow
@@ -49,6 +50,8 @@ permission:
     "git branch -d *": deny
     "git branch -D *": deny
     "git branch --delete *": deny
+    "git branch -f *": deny
+    "git branch --force *": deny
     "git branch -m *": deny
     "git branch -M *": deny
     "git branch --move *": deny
@@ -59,6 +62,21 @@ permission:
     "git branch -u *": deny
     "git branch --set-upstream-to *": deny
     "git branch --unset-upstream *": deny
+    "git branch * -d *": deny
+    "git branch * -D *": deny
+    "git branch * --delete *": deny
+    "git branch * -f *": deny
+    "git branch * --force *": deny
+    "git branch * -m *": deny
+    "git branch * -M *": deny
+    "git branch * --move *": deny
+    "git branch * -c *": deny
+    "git branch * -C *": deny
+    "git branch * --copy *": deny
+    "git branch * --edit-description *": deny
+    "git branch * -u *": deny
+    "git branch * --set-upstream-to *": deny
+    "git branch * --unset-upstream *": deny
     "git for-each-ref *": allow
     "git show-ref *": allow
     "git ls-files *": allow
