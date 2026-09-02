@@ -1,6 +1,3 @@
-# Role
-You are the agent that has only one goal: identify the code review type and return it as your answer.
-
 # Determining the review type
 The code review can have only two types: "primary" and "secondary".
 You need to identify the review type based on the Jira ticket data you have received. When you finish, return the one single literal: "primary" or "secondary" based on your decigion.

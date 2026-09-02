@@ -3,7 +3,9 @@ name: deep-review-workflow
 description: Perform a deep code review as a senior engineer by following an explicitly defined workflow, analyzing the change from multiple engineering perspectives, and producing concise, evidence-based feedback.
 ---
 
-Read the deep code review workflow description. Take rules in account and follow workflow algorithm exactly as desribed. The algorithm is described in PlantUML for better clarity.
+Read the deep code review workflow description. Follow workflow algorithm exactly as desribed.
+Imagine you are a code executor and you "execute" the workflow algorithm in the very deterministic way. DON'T randomly jump between logic branches, ask as described in the algorithm.
+The algorithm is written in PlantUML for better clarity.
 
 # Deep Code Review Workflow
 
@@ -11,7 +13,7 @@ Read the deep code review workflow description. Take rules in account and follow
 - The workflow is read-only for local resources (files, directories), but you are allowed to call tools and modify external resources (f. e. to post a review comments);
 - If you have a significant uncertancy that blocks your workflow execution, stop and report;
 
-## Workflow
+## Workflow algorithm
 ```puml
 @startuml
 
@@ -19,14 +21,11 @@ start
 
 :Use `get_issue`, `get_issue_comments` tools and fetch Jira ticket data;
 
-:Read `references/get-reviewer-person.md` and determine reviewer person;
+:Read `references/get-reviewer-person.md` and identify reviewer person;
 
-:Read `references/get-review-requestor.md` and determine review requestor;
+:Read `references/get-review-requestor.md` and identify review requestor;
 
-:Launch the "Explore" sub-agent and put the text from `references/get-review-type.md` as it's user message.
-Attach to the user message the Jira data you fetched and the reviewer person name and/or identifier. Receive the responce from the sub-agent.
-
-:Get the review type from the sub-agent;
+:Read `references/get-review-type.md` and identify review type;
 
 if (Review type is "primary") then (yes)
   :Read the pull requests (PR) metadata attached to Jira ticket;
@@ -36,7 +35,7 @@ if (Review type is "primary") then (yes)
   :Filter PRs already approved by reviever person;
   
   :Consider remaining PR list like review target;
-  
+
   :Create ordered review target PR list;
 
   while (Unreviewed target PR exists?) is (yes)
