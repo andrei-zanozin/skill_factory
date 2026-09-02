@@ -8,7 +8,8 @@ Read the deep code review workflow description. Take rules in account and follow
 # Deep Code Review Workflow
 
 ## General rules (applies to entire workflow, including subagents)
-- The workflow is read-only for local resources (files, directories), but you are allowed to call tools and modify external resources (f. e. to post a review comments)
+- The workflow is read-only for local resources (files, directories), but you are allowed to call tools and modify external resources (f. e. to post a review comments);
+- If you have a significant uncertancy that blocks your workflow execution, stop and report;
 
 ## Workflow
 ```puml
@@ -20,51 +21,54 @@ start
 
 :Read `references/get-reviewer-person.md` and determine reviewer person;
 
-:Launch the "Explore" sub-agent with the following user message:
-"Read `references/get-review-type.md` and execute".
-Send Jira data to it as a part of the user message;
+:Read `references/get-review-requestor.md` and determine review requestor;
+
+:Launch the "Explore" sub-agent and put the text from `references/get-review-type.md` as it's user message.
+Attach to the user message the Jira data you fetched and the reviewer person name and/or identifier. Receive the responce from the sub-agent.
 
 :Get the review type from the sub-agent;
 
 if (Review type is "primary") then (yes)
-  :Read the pull requests (PR) attached to Jira ticket;
+  :Read the pull requests (PR) metadata attached to Jira ticket;
+  
   :Filter "open" PRs;
+  
   :Filter PRs already approved by reviever person;
+  
   :Consider remaining PR list like review target;
+  
   :Create ordered review target PR list;
 
   while (Unreviewed target PR exists?) is (yes)
     :Select next unreviewed PR as current PR;
 
     fork
-      :Launch the "Explore" sub-agent with the following user message:
-      "Read `references/architecture-review.md` and execute".
-      Send Jira data and PR data to it as a part of the user message;
+      :Launch the "Explore" sub-agent and put the text from`references/architecture-review.md` as it's user message.
+      Attach to the user message the Jira data and the current PR metadata;
     fork again
-      :Launch the "Explore" sub-agent with the following user message:
-      "Read `references/unit-review.md` and execute".
-      Send Jira data and PR data to it as a part of the user message;
+      :Launch the "Explore" sub-agent and put the text from`references/unit-review.md` as it's user message.
+      Attach to the user message the Jira data and the current PR metadata;
     fork again
-      :Launch the "Explore" sub-agent with the following user message:
-      "Read `references/code-polish-review.md` and execute".
-      Send Jira data and PR data to it as a part of the user message;
+      :Launch the "Explore" sub-agent and put the text from`references/code-polish-review.md` as it's user message.
+      Attach to the user message the Jira data and the current PR metadata;
     end fork
 
-    :Receive the feedback from sub-agents, read `references/review-report.md` and prepare the report for current PR;
+    :Receive found issues from sub-agents;
 
-    if (Report status is "green") then (yes)
+    :Read `references/issue-consolidation.md` and consolidate code review issues;
+
+    if (No issues found from the consolidation) then (yes)
       :Approve the PR;
     else (no)
-      :Send comments to PR using `format-review-comments` skill;
+      :Post comments to PR;
+
       :Mark PR as "request changes";
     endif
 
     :Mark current PR as processed;
   endwhile (yes)
 
-  :Read `references/get-review-requestor.md` and determine review requestor;
-
-  if (All review target PRs have report status "green") then (yes)
+  if (All review target PRs have no issues found) then (yes)
     :Add comment "Hi [review_requestor], review is done ✅" to the Jira ticket;
   else (no)
     :Add comment "Hi [review_requestor], please check my findings in PR comments." to the Jira ticket;
