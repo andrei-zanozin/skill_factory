@@ -1,6 +1,6 @@
 ---
 name: deep-review-workflow
-description: Perform a deep code review as a senior engineer by following an explicitly defined workflow, analyzing the change from multiple engineering perspectives, and producing concise, evidence-based feedback.
+description: Perform a deep code review as a senior engineer by following an explicitly defined workflow, analyzing the change from multiple engineering perspectives, and producing concise, evidence-based feedback. IMPORTANT: this skill must starts only from `deep-review-workflow` command or if it's explicitly requested by the full skill name.
 ---
 
 Read the deep code review workflow description. Follow workflow algorithm exactly as desribed.
