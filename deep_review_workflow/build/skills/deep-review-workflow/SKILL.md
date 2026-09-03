@@ -10,7 +10,7 @@ The algorithm is written in PlantUML for better clarity.
 # Deep Code Review Workflow
 
 ## General rules (apply to the entire workflow, including subagents)
-- The workflow is read-only for local resources (files and directories), but you can call tools and modify external resources (e.g., to post review comments);
+- The workflow is read-only for local resources except that each subagent creates and removes its own temporary Git worktree and may create build artifacts inside it. You can call tools and modify external resources (e.g., to post review comments);
 - If significant uncertainty blocks the workflow execution, stop and report it;
 - Use lazy references loading. Read/load files in `references/` directory ONLY when you reach a workflow step where the file name is mentioned.
 
@@ -41,13 +41,17 @@ start
 while (Unreviewed target PR exists?) is (yes)
   :Select the next unreviewed PR as the current PR;
 
+  :Retain the local repository root, canonical Bitbucket project and repository identifiers, source branch, and full reviewed head commit as part of the current PR metadata;
+
+  :Read `references/worktree-isolation.md` and retain its complete text as the mandatory subagent worktree procedure;
+
   if (Review type is "secondary") then (yes)
     :Launch the "Explore" sub-agent and use the text from `references/secondary-review.md` as its user message.
-    Attach to the user message the Jira data, the reviewer person, and the current PR metadata;
+    Attach to the user message the full Jira data you have (don't forget to attach the reviewer person), the current PR metadata, the worktree procedure, and the review layer `secondary`;
 
     :Receive the secondary review result;
 
-    if (Secondary review failed?) then (yes)
+    if (Secondary review status == "Failed") then (yes)
       :Report the "Failed" error and stop;
       stop
     endif
@@ -57,16 +61,21 @@ while (Unreviewed target PR exists?) is (yes)
 
   fork
     :Launch the "Explore" sub-agent and use the text from `references/architecture-review.md` as its user message.
-    Attach to the user message the Jira data, the current PR metadata, and the complete issue format text;
+    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the worktree procedure, and the review layer `architecture`;
   fork again
     :Launch the "Explore" sub-agent and use the text from `references/unit-review.md` as its user message.
-    Attach to the user message the Jira data, the current PR metadata, and the complete issue format text;
+    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the worktree procedure, and the review layer `unit`;
   fork again
     :Launch the "Explore" sub-agent and use the text from `references/code-polish-review.md` as its user message.
-    Attach to the user message the Jira data, the current PR metadata, and the complete issue format text;
+    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the worktree procedure, and the review layer `code-polish`;
   end fork
 
   :Receive the issues found by the subagents and append the secondary review result when present;
+
+  if (Any review subagent result starts with "Failed:") then (yes)
+    :Report the failure and stop;
+    stop
+  endif
 
   :Validate every subagent issue against the mandatory issue format.
   Correct formatting-only deviations without changing meaning and stop if required content is missing;
@@ -79,8 +88,13 @@ while (Unreviewed target PR exists?) is (yes)
   if (No issues found during consolidation) then (yes)
     :Approve the PR;
   else (no)
+    :Before the first comment, use `get_pull_request` and `get_pull_request_diff` with the canonical project and repository identifiers to refresh the current PR and effective diff.
+    Require the reviewed head commit to remain current and preflight every consolidated location.
+    Confirm that its repository-relative path, line, and source/destination side identify the exact statement described by the finding.
+    If any location is stale, missing, ambiguous, or inconsistent with the evidence, stop before posting any comment;
+
     :Post each consolidated issue on the PR using the mandatory issue format.
-    For an anchored comment, remove only the complete `Location:` line;
+    Use the location's path, line, and side as the anchor. Remove only the complete `Location:` line from the comment text;
 
     :Mark PR as "request changes";
   endif
