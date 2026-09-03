@@ -53,25 +53,34 @@ while (Unreviewed target PR exists?) is (yes)
     endif
   endif
 
+  :Read `references/issue-format.md` and retain its complete text as the mandatory issue format;
+
   fork
     :Launch the "Explore" sub-agent and use the text from `references/architecture-review.md` as its user message.
-    Attach to the user message the Jira data and the current PR metadata;
+    Attach to the user message the Jira data, the current PR metadata, and the complete issue format text;
   fork again
     :Launch the "Explore" sub-agent and use the text from `references/unit-review.md` as its user message.
-    Attach to the user message the Jira data and the current PR metadata;
+    Attach to the user message the Jira data, the current PR metadata, and the complete issue format text;
   fork again
     :Launch the "Explore" sub-agent and use the text from `references/code-polish-review.md` as its user message.
-    Attach to the user message the Jira data and the current PR metadata;
+    Attach to the user message the Jira data, the current PR metadata, and the complete issue format text;
   end fork
 
   :Receive the issues found by the subagents and append the secondary review result when present;
 
+  :Validate every subagent issue against the mandatory issue format.
+  Correct formatting-only deviations without changing meaning and stop if required content is missing;
+
   :Read `references/issue-consolidation.md` and consolidate code review issues;
+
+  :Validate every consolidated issue against the mandatory issue format.
+  Correct formatting-only deviations without changing meaning and stop if required content is missing;
 
   if (No issues found during consolidation) then (yes)
     :Approve the PR;
   else (no)
-    :Post comments on the PR;
+    :Post each consolidated issue on the PR using the mandatory issue format.
+    For an anchored comment, remove only the complete `Location:` line;
 
     :Mark PR as "request changes";
   endif
