@@ -12,6 +12,7 @@ The algorithm is written in PlantUML for better clarity.
 ## General rules (apply to the entire workflow, including subagents)
 - The workflow is read-only for local resources (files and directories), but you can call tools and modify external resources (e.g., to post review comments);
 - If significant uncertainty blocks the workflow execution, stop and report it;
+- Use lazy references loading. Read/load files in `references/` directory ONLY when you reach a workflow step where the file name is mentioned.
 
 ## Workflow algorithm
 ```puml
