@@ -28,7 +28,7 @@ start
 
 :Read `references/get-review-type.md` and identify the review type;
 
-:Read the pull request (PR) metadata attached to the Jira ticket;
+:Use the `search_pull_requests` tool to find PRs by the Jira issue key;
 
 :Filter for "open" PRs;
 
