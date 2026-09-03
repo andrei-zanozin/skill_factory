@@ -28,56 +28,64 @@ start
 
 :Read `references/get-review-type.md` and identify the review type;
 
-if (Review type is "primary") then (yes)
-  :Read the pull request (PR) metadata attached to the Jira ticket;
-  
-  :Filter for "open" PRs;
-  
-  :Filter out PRs already approved by the reviewer person;
-  
-  :Treat the remaining PR list as the review target;
+:Read the pull request (PR) metadata attached to the Jira ticket;
 
-  :Create an ordered list of review target PRs;
+:Filter for "open" PRs;
 
-  while (Unreviewed target PR exists?) is (yes)
-    :Select the next unreviewed PR as the current PR;
+:Filter out PRs already approved by the reviewer person;
 
-    fork
-      :Launch the "Explore" sub-agent and use the text from `references/architecture-review.md` as its user message.
-      Attach to the user message the Jira data and the current PR metadata;
-    fork again
-      :Launch the "Explore" sub-agent and use the text from `references/unit-review.md` as its user message.
-      Attach to the user message the Jira data and the current PR metadata;
-    fork again
-      :Launch the "Explore" sub-agent and use the text from `references/code-polish-review.md` as its user message.
-      Attach to the user message the Jira data and the current PR metadata;
-    end fork
+:Treat the remaining PR list as the review target;
 
-    :Receive the issues found by the subagents;
+:Create an ordered list of review target PRs;
 
-    :Read `references/issue-consolidation.md` and consolidate code review issues;
+while (Unreviewed target PR exists?) is (yes)
+  :Select the next unreviewed PR as the current PR;
 
-    if (No issues found during consolidation) then (yes)
-      :Approve the PR;
-    else (no)
-      :Post comments on the PR;
+  if (Review type is "secondary") then (yes)
+    :Launch the "Explore" sub-agent and use the text from `references/secondary-review.md` as its user message.
+    Attach to the user message the Jira data, the reviewer person, and the current PR metadata;
 
-      :Mark PR as "request changes";
+    :Receive the secondary review result;
+
+    if (Secondary review failed?) then (yes)
+      :Report the "Failed" error and stop;
+      stop
     endif
-
-    :Mark the current PR as processed;
-  endwhile (yes)
-
-  if (No issues were found in any review target PR) then (yes)
-    :Add the comment "Hi [review_requestor], review is done ✅" to the Jira ticket;
-  else (no)
-    :Add the comment "Hi [review_requestor], please check my findings in the PR comments." to the Jira ticket;
   endif
 
-  :Assign the ticket to the review requestor person;
+  fork
+    :Launch the "Explore" sub-agent and use the text from `references/architecture-review.md` as its user message.
+    Attach to the user message the Jira data and the current PR metadata;
+  fork again
+    :Launch the "Explore" sub-agent and use the text from `references/unit-review.md` as its user message.
+    Attach to the user message the Jira data and the current PR metadata;
+  fork again
+    :Launch the "Explore" sub-agent and use the text from `references/code-polish-review.md` as its user message.
+    Attach to the user message the Jira data and the current PR metadata;
+  end fork
+
+  :Receive the issues found by the subagents and append the secondary review result when present;
+
+  :Read `references/issue-consolidation.md` and consolidate code review issues;
+
+  if (No issues found during consolidation) then (yes)
+    :Approve the PR;
+  else (no)
+    :Post comments on the PR;
+
+    :Mark PR as "request changes";
+  endif
+
+  :Mark the current PR as processed;
+endwhile (yes)
+
+if (No issues were found in any review target PR) then (yes)
+  :Add the comment "Hi [review_requestor], review is done ✅" to the Jira ticket;
 else (no)
-  :Skip the review and report that it was skipped;
+  :Add the comment "Hi [review_requestor], please check my findings in the PR(s) comments." to the Jira ticket;
 endif
+
+:Assign the ticket to the review requestor person;
 
 stop
 

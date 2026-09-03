@@ -8,7 +8,7 @@ Deduplicate them to avoid reporting the same issue twice.
 - Select the most detailed and informative issue when the contents ("Location", "Problem and impact", "Suggested fix", etc.) do not match exactly but are similar.
 - Inherit the highest "Severity" from the issues you are deduplicating.
 - Always use the "Title" from the issue you selected; do not merge or replace titles from different issues.
-- If you received "No issues found" from **all code review agents**, the consolidation result is also "No issues found".
+- The consolidation result is "No issues found" only if all subagents, including the secondary review subagent when present, returned "No issues found". Treat "Done" as unresolved previous review issues, not as a new issue.
 
 ## Consolidated list format
 Read `references/issue-format.md` and apply the format to all issues you consolidated.
