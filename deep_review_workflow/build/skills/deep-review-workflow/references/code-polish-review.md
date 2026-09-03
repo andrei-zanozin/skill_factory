@@ -21,9 +21,9 @@ Review clarity, maintainability, consistency, naming, style, formatting, and oth
 
 ## Finding boundary
 
-Focus on small quality defects rather than functional or architectural re-review. If inspection reveals a concrete correctness defect, capture its evidence without suppressing it;
+Focus on small quality defects rather than functional or architectural re-review. If inspection reveals a concrete correctness defect, capture its evidence without suppressing it.
 
 ## Output format
-Read `references/issue-format.md` and apply the format to all ussues you found.
+Read `references/issue-format.md` and apply the format to all issues you found.
 Return only formatted issues and no additional text.
-If you found no issues, just return only one literal "No issues found".
+If you found no issues, return only the literal "No issues found".

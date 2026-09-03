@@ -10,4 +10,4 @@ Describe review issues using this exact format:
 - Evidence: <verified evidence>
 ```
 
-Divide multiple issues by an empty line.
+Separate multiple issues with an empty line.

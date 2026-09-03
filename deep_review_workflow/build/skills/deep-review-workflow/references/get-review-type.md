@@ -1,17 +1,17 @@
 # Determining the review type
-The code review can have only two types: "primary" and "secondary".
-You need to identify the review type based on the Jira ticket data you have received. When you finish, return the one single literal: "primary" or "secondary" based on your decigion.
+A code review can have only two types: "primary" and "secondary".
+Identify the review type based on the Jira ticket data you received. When you finish, return only one literal, "primary" or "secondary", based on your decision.
 
-# Metodology
-Analyse the Jira ticket data you have received from the requestor.
+# Methodology
+Analyze the Jira ticket data you received.
 
-It's likely "primary" review when:
-- The code review requestor asks the reviewer person to do the code review for the first time in comments;
-- There are no comments yet about found review issues from the **reviewer person** in comments;
+It is likely a "primary" review when:
+- The code review requestor person asks the reviewer person for a code review for the first time in the comments;
+- There are no comments from the **reviewer person** about review issues found;
 
-It's likely "secondary" review when:
-- There are already comments about found code review issues from the **reviewer person**;
-- There are already comments about fixed code review issues from the review requestor;
-- There is a comment from the review requestor with ask to make the review one more time;
+It is likely a "secondary" review when:
+- There are already comments from the **reviewer person** about code review issues found;
+- There are already comments from the review requestor person about fixed code review issues;
+- There is a comment from the review requestor person asking for another review;
 
-Output format: only one word from ["primary", "secondary"];
+Output format: only one word from ["primary", "secondary"].
