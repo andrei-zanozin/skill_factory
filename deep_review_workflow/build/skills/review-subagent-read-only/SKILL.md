@@ -1,8 +1,13 @@
+---
+name: review-subagent-read-only
+description: "Mandatory local read-only repository rules for deep review subagents. Load only when a review layer skill requires it."
+---
+
 # Read-only repository inspection
 
 Use the attached local repository root, current PR metadata, and review layer. The orchestrator has already verified that the local checkout is clean and its HEAD equals the full reviewed head commit.
 
-Inspect the repository using all necessary read-only tools. You may read and search files, inspect Git history and diffs, and call read-only external tools. Keep all repository evidence tied to the verified reviewed head commit.
+Inspect the repository using all necessary read-only tools. You may read and search files and inspect Git history and diffs. You may call external tools required by the assigned review instructions. Keep all repository evidence tied to the verified reviewed head commit.
 
 Do not modify local files, directories, or Git state. In particular:
 

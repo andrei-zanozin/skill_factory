@@ -1,3 +1,10 @@
+---
+name: review-subagent-unit
+description: "Review one PR for unit correctness and test quality. Load only when an orchestrator assigns the unit review layer."
+---
+
+Before any investigation, load the `review-subagent-read-only` and `review-issue-format` skills. If either skill cannot be loaded without approval, return only `Failed: review instruction loading failed: <skill and reason>`.
+
 # Unit Correctness Review Rubric
 
 Review changed and affected units for implementation bugs, edge cases, regressions, and test quality.
@@ -26,6 +33,6 @@ Report concrete implementation defects, unhandled edge cases, regressions, and t
 Never infer correctness solely from test presence or a passing suite. Return coverage and limitations even when no findings exist.
 
 ## Output format
-Read `references/issue-format.md` and apply the format to all issues you found.
+Apply the loaded `review-issue-format` skill to all issues you found.
 Return only formatted issues and no additional text.
 If you found no issues, return only the literal "No issues found".

@@ -11,6 +11,8 @@ The algorithm is written in PlantUML for better clarity.
 
 ## General rules (apply to the entire workflow, including subagents)
 - The orchestrator may modify local Git state only to prepare the verified PR checkout described below. Review subagents are strictly read-only for local resources and must not use Git worktrees. You can call tools and modify external resources (e.g., to post review comments);
+- The orchestrator must not load any `review-subagent-*` skill. It passes only the required layer skill name to each review subagent, which loads its own instructions;
+- Every review subagent message must require `Failed: review instruction loading failed: <skill and reason>` when the named layer skill cannot be loaded without approval;
 - If significant uncertainty blocks the workflow execution, stop and report it;
 - Use lazy references loading. Read/load files in `references/` directory ONLY when you reach a workflow step where the file name is mentioned.
 
@@ -78,11 +80,10 @@ while (Unreviewed target PR exists?) is (yes)
     stop
   endif
 
-  :Read `references/read-only-repository-inspection.md` and retain its complete text as the mandatory subagent repository inspection procedure;
-
   if (Review type is "secondary") then (yes)
-    :Launch the "Explore" sub-agent and use the text from `references/secondary-review.md` as its user message.
-    Attach to the user message the full Jira data you have (don't forget to attach the reviewer person), the current PR metadata, the repository inspection procedure, and the review layer `secondary`;
+    :Launch the "Explore" sub-agent and tell it to load the `review-subagent-secondary` skill itself before reviewing.
+    Do not load, read, quote, or expand the skill in the orchestrator.
+    Attach only the skill name, the full Jira data you have (don't forget to attach the reviewer person), the current PR metadata, and the review layer `secondary`;
 
     :Receive the secondary review result;
 
@@ -92,17 +93,20 @@ while (Unreviewed target PR exists?) is (yes)
     endif
   endif
 
-  :Read `references/issue-format.md` and retain its complete text as the mandatory issue format;
+  :Load the shared `review-issue-format` skill and retain its complete text as the mandatory issue format;
 
   fork
-    :Launch the "Explore" sub-agent and use the text from `references/architecture-review.md` as its user message.
-    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the repository inspection procedure, and the review layer `architecture`;
+    :Launch the "Explore" sub-agent and tell it to load the `review-subagent-architecture` skill itself before reviewing.
+    Do not load, read, quote, or expand the skill in the orchestrator.
+    Attach only the skill name, the Jira data, the current PR metadata, and the review layer `architecture`;
   fork again
-    :Launch the "Explore" sub-agent and use the text from `references/unit-review.md` as its user message.
-    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the repository inspection procedure, and the review layer `unit`;
+    :Launch the "Explore" sub-agent and tell it to load the `review-subagent-unit` skill itself before reviewing.
+    Do not load, read, quote, or expand the skill in the orchestrator.
+    Attach only the skill name, the Jira data, the current PR metadata, and the review layer `unit`;
   fork again
-    :Launch the "Explore" sub-agent and use the text from `references/code-polish-review.md` as its user message.
-    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the repository inspection procedure, and the review layer `code-polish`;
+    :Launch the "Explore" sub-agent and tell it to load the `review-subagent-code-polish` skill itself before reviewing.
+    Do not load, read, quote, or expand the skill in the orchestrator.
+    Attach only the skill name, the Jira data, the current PR metadata, and the review layer `code-polish`;
   end fork
 
   :Receive the issues found by the subagents and append the secondary review result when present;

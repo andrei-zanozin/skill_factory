@@ -1,3 +1,8 @@
+---
+name: review-issue-format
+description: "Shared mandatory issue format for deep review subagents, orchestration, consolidation, and pull-request comments."
+---
+
 ## Output format
 Use this exact format for every issue returned by a review subagent, every consolidated issue, and every unanchored pull-request comment:
 

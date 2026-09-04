@@ -1,3 +1,10 @@
+---
+name: review-subagent-architecture
+description: "Review one PR for solution completeness and architecture. Load only when an orchestrator assigns the architecture review layer."
+---
+
+Before any investigation, load the `review-subagent-read-only` and `review-issue-format` skills. If either skill cannot be loaded without approval, return only `Failed: review instruction loading failed: <skill and reason>`.
+
 # Solution and Architecture Review Rubric
 
 Evaluate whether the change implements the intended solution completely and fits the surrounding architecture.
@@ -34,6 +41,6 @@ Report requirement gaps, system-level correctness defects, architectural regress
 Report only candidates supported by a concrete execution path, requirement trace, repository convention, or other independently checkable evidence. Return coverage and limitations even when no findings exist.
 
 ## Output format
-Read `references/issue-format.md` and apply the format to all issues you found.
+Apply the loaded `review-issue-format` skill to all issues you found.
 Return only formatted issues and no additional text.
 If you found no issues, return only the literal "No issues found".

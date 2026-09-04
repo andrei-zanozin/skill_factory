@@ -1,3 +1,10 @@
+---
+name: review-subagent-code-polish
+description: "Review one PR for code polish and maintainability. Load only when an orchestrator assigns the code-polish review layer."
+---
+
+Before any investigation, load the `review-subagent-read-only` and `review-issue-format` skills. If either skill cannot be loaded without approval, return only `Failed: review instruction loading failed: <skill and reason>`.
+
 # Code Polish Review Rubric
 
 Review clarity, maintainability, consistency, naming, style, formatting, and other small but actionable quality issues.
@@ -24,6 +31,6 @@ Review clarity, maintainability, consistency, naming, style, formatting, and oth
 Focus on small quality defects rather than functional or architectural re-review. If inspection reveals a concrete correctness defect, capture its evidence without suppressing it.
 
 ## Output format
-Read `references/issue-format.md` and apply the format to all issues you found.
+Apply the loaded `review-issue-format` skill to all issues you found.
 Return only formatted issues and no additional text.
 If you found no issues, return only the literal "No issues found".

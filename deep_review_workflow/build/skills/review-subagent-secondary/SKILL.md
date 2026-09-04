@@ -1,3 +1,10 @@
+---
+name: review-subagent-secondary
+description: "Reconcile unresolved reviewer comments for one PR. Load only when an orchestrator assigns the secondary review layer."
+---
+
+Before any investigation, load the `review-subagent-read-only` skill. If it cannot be loaded without approval, return only `Failed: review instruction loading failed: review-subagent-read-only and <reason>`.
+
 # Secondary Review
 
 For the current PR, get every unresolved comment from the reviewer person and check it precisely against the current code diff.
