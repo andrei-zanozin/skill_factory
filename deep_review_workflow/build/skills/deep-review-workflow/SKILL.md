@@ -10,7 +10,7 @@ The algorithm is written in PlantUML for better clarity.
 # Deep Code Review Workflow
 
 ## General rules (apply to the entire workflow, including subagents)
-- The orchestrator may modify local Git state only to prepare the verified PR checkout described below. Review subagents are strictly read-only for local resources and must not use Git worktrees. You can call tools and modify external resources (e.g., to post review comments);
+- The orchestrator may modify local Git state only to prepare the verified PR checkout described below. Review subagents are strictly read-only for local resources and must not use Git worktrees. This local read-only restriction does not prohibit external actions explicitly required by a review skill, such as resolving or replying to pull-request comments;
 - The orchestrator must not load any `review-subagent-*` skill. It passes only the required layer skill name to each review subagent, which loads its own instructions;
 - Every review subagent message must require `Failed: review instruction loading failed: <skill and reason>` when the named layer skill cannot be loaded without approval;
 - If significant uncertainty blocks the workflow execution, stop and report it;
@@ -83,7 +83,7 @@ while (Unreviewed target PR exists?) is (yes)
   if (Review type is "secondary") then (yes)
     :Launch the "Explore" sub-agent and tell it to load the `review-subagent-secondary` skill itself before reviewing.
     Do not load, read, quote, or expand the skill in the orchestrator.
-    Attach only the skill name, the full Jira data you have (don't forget to attach the reviewer person), the current PR metadata, and the review layer `secondary`;
+    Attach only the skill name, a statement that read-only restrictions apply only to local resources and do not prohibit the external comment actions required by the skill, the full Jira data you have (don't forget to attach the reviewer person), the current PR metadata, and the review layer `secondary`;
 
     :Receive the secondary review result;
 
@@ -124,9 +124,12 @@ while (Unreviewed target PR exists?) is (yes)
   :Validate every consolidated issue against the mandatory issue format.
   Correct formatting-only deviations without changing meaning and stop if required content is missing;
 
-  if (No issues found during consolidation) then (yes)
-    :Approve the PR;
-  else (no)
+  if (Review type is "secondary") then (yes)
+    :Use `get_pull_request_comments` to refresh unresolved root comments authored by the reviewer person.
+    Remove from the consolidated list any finding that clearly reports the same defect already represented by one of those comments, following `references/issue-consolidation.md`;
+  endif
+
+  if (Any new consolidated issues remain?) then (yes)
     :Before the first comment, use `get_pull_request` and `get_pull_request_diff` with the canonical project and repository identifiers to refresh the current PR and effective diff.
     Require the reviewed head commit to remain current and preflight every consolidated location.
     Confirm that its repository-relative path, line, and source/destination side identify the exact statement described by the finding.
@@ -136,6 +139,12 @@ while (Unreviewed target PR exists?) is (yes)
     Use the location's path, line, and side as the anchor. Remove only the complete `Location:` line from the comment text;
 
     :Mark PR as "request changes";
+  else (no)
+    if (Secondary review status == "Done") then (yes)
+      :Keep or mark the PR as "request changes" without posting a new finding;
+    else (no)
+      :Approve the PR;
+    endif
   endif
 
   :Mark the current PR as processed;

@@ -11,6 +11,7 @@ Deduplicate them to avoid reporting the same issue twice.
 - Inherit the highest "Severity" from the issues you are deduplicating.
 - Always use the "Title" from the issue you selected; do not merge or replace titles from different issues.
 - The consolidation result is "No issues found" only if all subagents, including the secondary review subagent when present, returned "No issues found". Treat "Done" as unresolved previous review issues, not as a new issue.
+- During a secondary review, compare consolidated findings with the refreshed unresolved root comments authored by the reviewer person. Exclude a finding from the new-issue list only when it clearly describes the same underlying defect and affected unit as an existing comment already handled by the secondary review. The anchors may differ because the diff changed between review rounds. Keep the finding as new when the match is uncertain or the behavior is materially different.
 
 ## Consolidated list format
 Apply the loaded `review-issue-format` skill to all issues you consolidated.
