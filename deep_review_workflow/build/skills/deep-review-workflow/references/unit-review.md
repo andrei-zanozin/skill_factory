@@ -16,8 +16,8 @@ Review changed and affected units for implementation bugs, edge cases, regressio
    - Confirm tests exercise externally meaningful behavior rather than only implementation details.
    - Check assertions, fixtures, mocks, parameterization, negative paths, boundary cases, and failure behavior.
    - Detect tests that pass for the wrong reason, cannot fail when production behavior is wrong, or omit a changed execution path.
-   - Run only approved focused checks that materially strengthen or falsify a candidate.
-   - Record commands or checks exactly, including failures, skips, environmental blockers, and generated build artifacts.
+   - Run only approved focused read-only checks that materially strengthen or falsify a candidate.
+   - Record read-only commands or checks exactly, including failures, skips, and environmental blockers.
 
 ## Finding boundary
 

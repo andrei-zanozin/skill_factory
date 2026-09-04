@@ -10,7 +10,7 @@ The algorithm is written in PlantUML for better clarity.
 # Deep Code Review Workflow
 
 ## General rules (apply to the entire workflow, including subagents)
-- The workflow is read-only for local resources except that each subagent creates and removes its own temporary Git worktree and may create build artifacts inside it. You can call tools and modify external resources (e.g., to post review comments);
+- The orchestrator may modify local Git state only to prepare the verified PR checkout described below. Review subagents are strictly read-only for local resources and must not use Git worktrees. You can call tools and modify external resources (e.g., to post review comments);
 - If significant uncertainty blocks the workflow execution, stop and report it;
 - Use lazy references loading. Read/load files in `references/` directory ONLY when you reach a workflow step where the file name is mentioned.
 
@@ -43,11 +43,46 @@ while (Unreviewed target PR exists?) is (yes)
 
   :Retain the local repository root, canonical Bitbucket project and repository identifiers, source branch, and full reviewed head commit as part of the current PR metadata;
 
-  :Read `references/worktree-isolation.md` and retain its complete text as the mandatory subagent worktree procedure;
+  :Read local HEAD and `git status --porcelain`;
+
+  if (`git status --porcelain` is not empty?) then (yes)
+    :Report `Failed: local PR checkout verification failed: local checkout is not clean` and stop.
+    Do not stash, clean, reset, or carry local changes to another branch;
+    stop
+  endif
+
+  if (Local HEAD differs from the full reviewed head commit?) then (yes)
+    :Fetch the source branch from `origin` into its remote-tracking reference using `--no-write-fetch-head`;
+
+    if (Fetched remote-tracking branch tip differs from the full reviewed head commit?) then (yes)
+      :Report `Failed: local PR checkout verification failed: fetched source branch does not match the PR head` and stop;
+      stop
+    endif
+
+    if (Local source branch does not exist?) then (yes)
+      :Create and switch to a local source branch that tracks the fetched remote-tracking branch;
+    else (no)
+      if (Local source branch equals or is an ancestor of the reviewed head commit?) then (yes)
+        :Switch to the local source branch and update it only with a fast-forward to the fetched remote-tracking branch;
+      else (no)
+        :Report `Failed: local PR checkout verification failed: local source branch is ahead or divergent` and stop;
+        stop
+      endif
+    endif
+  endif
+
+  :Require local HEAD to equal the full reviewed head commit and `git status --porcelain` to be empty;
+
+  if (Local PR checkout preparation failed?) then (yes)
+    :Report `Failed: local PR checkout verification failed: <reason>` and stop before launching any review subagent;
+    stop
+  endif
+
+  :Read `references/read-only-repository-inspection.md` and retain its complete text as the mandatory subagent repository inspection procedure;
 
   if (Review type is "secondary") then (yes)
     :Launch the "Explore" sub-agent and use the text from `references/secondary-review.md` as its user message.
-    Attach to the user message the full Jira data you have (don't forget to attach the reviewer person), the current PR metadata, the worktree procedure, and the review layer `secondary`;
+    Attach to the user message the full Jira data you have (don't forget to attach the reviewer person), the current PR metadata, the repository inspection procedure, and the review layer `secondary`;
 
     :Receive the secondary review result;
 
@@ -61,13 +96,13 @@ while (Unreviewed target PR exists?) is (yes)
 
   fork
     :Launch the "Explore" sub-agent and use the text from `references/architecture-review.md` as its user message.
-    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the worktree procedure, and the review layer `architecture`;
+    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the repository inspection procedure, and the review layer `architecture`;
   fork again
     :Launch the "Explore" sub-agent and use the text from `references/unit-review.md` as its user message.
-    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the worktree procedure, and the review layer `unit`;
+    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the repository inspection procedure, and the review layer `unit`;
   fork again
     :Launch the "Explore" sub-agent and use the text from `references/code-polish-review.md` as its user message.
-    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the worktree procedure, and the review layer `code-polish`;
+    Attach to the user message the Jira data, the current PR metadata, the complete issue format text, the repository inspection procedure, and the review layer `code-polish`;
   end fork
 
   :Receive the issues found by the subagents and append the secondary review result when present;
